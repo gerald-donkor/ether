@@ -1,26 +1,181 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/* ---------------------------------------------------------------------------
+   Ether design tokens. Source of truth: design-system.md
+   Every value here is sampled from public/assets/ui/ref/AI Generator.svg.
+   No component file may contain a raw hex literal.
+--------------------------------------------------------------------------- */
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+@theme {
+  /* Color, design-system.md 1.1 */
+  --color-ink: #0a0a0a;
+  --color-ink-raised: #0f0f0f;
+  --color-surface: #19161c;
+  --color-surface-2: #292929;
+  --color-line: #292929;
+  --color-violet: #6843ec;
+  --color-violet-deep: #832bc1;
+  --color-magenta: #f452ff;
+  --color-lime: #d2ff3a;
+  --color-text: #ffffff;
+  --color-text-2: #c4c4c4;
+  --color-text-3: #848895;
+  --color-youtube: #ed1d24;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  /* Type, design-system.md 1.3 */
+  --font-sans: var(--font-outfit), ui-sans-serif, system-ui, sans-serif;
+  --font-brand: var(--font-tektur), var(--font-outfit), sans-serif;
+
+  /* Shape, design-system.md 1.5 */
+  --radius-card: 24px;
+  --radius-panel: 16px;
+  --radius-pill: 9999px;
+
+  /* Layout, design-system.md 1.4 */
+  --container-wide: 1240px;
+  --container-inner: 1080px;
+
+  /* The page's one marquee. Transform only, so it stays on the compositor. */
+  --animate-drift: drift 70s linear infinite;
+
+  @keyframes drift {
+    from {
+      transform: translate3d(0, 0, 0);
+    }
+    to {
+      transform: translate3d(-50%, 0, 0);
+    }
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Gradients, design-system.md 1.2. Kept as custom properties rather than
+   utilities: each has exactly one site of use. */
+:root {
+  --grad-hero: radial-gradient(
+    120% 90% at 0% 0%,
+    #4b2fa8 0%,
+    #2a1a5e 28%,
+    #0a0a0a 62%
+  );
+  --grad-stat: linear-gradient(90deg, #6843ec 0%, #d2ff3a 100%);
+  --grad-arc: conic-gradient(
+    from 200deg,
+    #832bc1,
+    #f452ff,
+    #6843ec,
+    #1fbf8f,
+    #832bc1
+  );
+  --grad-block: linear-gradient(135deg, #6843ec 0%, #4322a8 100%);
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  color-scheme: dark;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--color-ink);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* design-system.md 6.8: every keyboard stop is visible. */
+  :focus-visible {
+    outline: 2px solid var(--color-lime);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::selection {
+    background-color: var(--color-lime);
+    color: var(--color-ink);
+  }
+
+  /* Kills the 300ms tap delay without disabling pinch zoom. */
+  a,
+  button,
+  input,
+  label,
+  summary {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Section headings are jump targets for the skip link and the nav. */
+  :where(h1, h2, h3)[id] {
+    scroll-margin-top: 96px;
+  }
+}
+
+@layer utilities {
+  /* Violet-to-lime numerals. The solid fallback is required: without it,
+     browsers lacking background-clip:text render the number invisible. */
+  .text-grad-stat {
+    color: var(--color-lime);
+  }
+
+  @supports (background-clip: text) or (-webkit-background-clip: text) {
+    .text-grad-stat {
+      background-image: var(--grad-stat);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Reveals.
+
+   These are CSS scroll-driven animations rather than JavaScript observers.
+   The markup ships visible: if the browser lacks `animation-timeline` (Safari,
+   Firefox today) the content simply appears, and nothing is ever hidden behind
+   a script that might not run. `both` fill means anything already past its
+   range at load, the hero included, settles on the finished state.
+--------------------------------------------------------------------------- */
+@keyframes reveal-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 24px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) {
+    .reveal {
+      animation: reveal-in linear both;
+      animation-timeline: view();
+      animation-range: entry 5% cover 20%;
+    }
+  }
+
+  /* The hero is above the fold, so it plays on load rather than on scroll. */
+  .hero-in {
+    animation: reveal-in 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation-delay: calc(var(--i, 0) * 90ms);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
