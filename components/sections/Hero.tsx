@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import Image from "next/image";
 import { ArrowUpRight } from "@phosphor-icons/react/dist/ssr/ArrowUpRight";
 import { Mark } from "@/components/brand/Mark";
+import { LivePhoto } from "@/components/motion/LivePhoto";
 import { MarkSpiral } from "@/components/motion/MarkSpiral";
 import { Container } from "@/components/ui/Container";
 import { z } from "@/lib/z";
@@ -60,14 +61,17 @@ export function Hero() {
             <div className="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-12 lg:grid-rows-2">
               {/* Generated image */}
               <div className="rounded-card relative overflow-hidden sm:col-span-2 lg:col-span-5 lg:row-span-2">
-                <Image
-                  src="/assets/ui/img/macaw.jpg"
-                  alt="A macaw rendered by Ether, its feathers beaded with water."
-                  width={1060}
-                  height={606}
-                  priority
-                  className="h-full min-h-[220px] w-full object-cover"
-                />
+                <LivePhoto>
+                  <Image
+                    src="/assets/ui/img/macaw.jpg"
+                    alt="A macaw rendered by Ether, its feathers beaded with water."
+                    width={1060}
+                    height={606}
+                    priority
+                    data-photo
+                    className="h-full min-h-[220px] w-full object-cover"
+                  />
+                </LivePhoto>
                 <span
                   className="text-text absolute bottom-4 left-5 text-[15px] font-medium"
                   style={{ zIndex: z.overlay }}

@@ -159,6 +159,12 @@
     }
   }
 
+  /* The hero photograph drifts for the life of the page, so it is the one
+     element that earns a compositor layer up front. Nowhere else. */
+  [data-photo] {
+    will-change: transform;
+  }
+
   /* The hero is above the fold, so it plays on load rather than on scroll. */
   .hero-in {
     animation: reveal-in 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
