@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import Image from "next/image";
 import { ArrowUpRight } from "@phosphor-icons/react/dist/ssr/ArrowUpRight";
 import { Mark } from "@/components/brand/Mark";
+import { DropletBloom } from "@/components/motion/DropletBloom";
 import { LivePhoto } from "@/components/motion/LivePhoto";
 import { MarkSpiral } from "@/components/motion/MarkSpiral";
 import { Container } from "@/components/ui/Container";
@@ -71,6 +72,7 @@ export function Hero() {
                     data-photo
                     className="h-full min-h-[220px] w-full object-cover"
                   />
+                  <DropletBloom />
                 </LivePhoto>
                 <span
                   className="text-text absolute bottom-4 left-5 text-[15px] font-medium"

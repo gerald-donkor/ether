@@ -68,10 +68,16 @@ export function LivePhoto({ children }: { children: ReactNode }) {
           if (!motion) return;
 
           const root = scope.current;
-          const photo = root?.querySelector<HTMLElement>("[data-photo]");
+          // Every `[data-photo]` node, not the first: the picture and the
+          // droplet bloom drawn over it share one box and must share one
+          // transform, so they are driven as a single set of targets rather
+          // than by mirrored tweens that could drift apart.
+          const photo = root
+            ? gsap.utils.toArray<SVGElement | HTMLElement>("[data-photo]", root)
+            : [];
           // The wrapper is `display: contents`, so the card is its parent.
           const card = root?.parentElement;
-          if (!photo || !card) return;
+          if (!photo.length || !card) return;
 
           const pan = gsap.fromTo(
             photo,
