@@ -185,12 +185,12 @@ Restrained and motivated. Every animation below has a stated reason; anything wi
 | Ambient arc | 40s rotation, `opacity ≤ 0.5` | Signals a live/generative system |
 | Gallery | Slow horizontal drift, pauses on hover. The two stacked columns also counter-scroll vertically, 22s up and 26s down | Communicates breadth without demanding attention. The second axis gives that breadth depth, and the still full-height photos beside it are what make the movement read |
 | Logo wall | Continuous right-to-left marquee, ~60px/s, full-bleed, never pauses | The row's argument is breadth of adoption, and a row that keeps producing new names argues it better than a row of seven that fits on one line |
-| Hero brand block | The four marks hop between waypoints on their own rings, ~14s a lap, radius breathing twice a lap and the whole set swinging 1.2° against the fastest orbit. Closing on each other knocks both apart with a squash and an elastic spring back | The block is the page's one purely decorative tile and the only place the brand mark exists at size, so it is where a brand flourish belongs and the only place it costs nothing to read |
+| Hero brand block | The four marks run as four rigid bodies on a ticker: they travel the tile, bounce off the walls and off each other, and are thrown in proportion to their mass, so the dot is flung and the bolt barely yields. The group is scaled down to buy them room and swings 1.2° under the whole thing. Each contact squashes both along the impact normal and springs back | The block is the page's one purely decorative tile and the only place the brand mark exists at size, so it is where a brand flourish belongs and the only place it costs nothing to read |
 | Button `:active` | `scale(0.98)` | Tactile feedback |
 
 Easing: `cubic-bezier(0.16, 1, 0.3, 1)`. Springs only on hover physics.
 
-**Two marquee regions, both ambient** - the gallery on both its axes, and the logo wall on one. `prefers-reduced-motion: reduce` disables the arc rotation, the gallery drift, the logo wall marquee, the brand block orbit, and all scroll reveals; the count-up snaps to its final value.
+**Two marquee regions, both ambient** - the gallery on both its axes, and the logo wall on one. `prefers-reduced-motion: reduce` disables the arc rotation, the gallery drift, the logo wall marquee, the brand block simulation, and all scroll reveals; the count-up snaps to its final value.
 
 ---
 
@@ -221,7 +221,7 @@ From `.agents/skills`. Where the brief and a skill default disagree, the brief w
 | §8: never ship dark-only | The page is dark-locked | The reference has no light mode. Recorded in §6 of this document as a deliberate lock, not an omission. |
 | §9.F: no labels overlaid on images | The `AI Generator` caption sits on the macaw tile | It is in the reference artboard. It is the only image overlay on the page. |
 | §5.2 / §3, one marquee per page | The logo wall becomes a second marquee region | The user asked for it explicitly, pointing at the partner row and at the target behaviour in the reference screencast. Per `AGENTS.md` §1 an explicit user request overrides the rule, so the rule is not silently bent: it is retired and rewritten as **two marquee regions, both ambient**. |
-| §3, restrained motion: decorative loops do not ship | The hero's brand block animates its four marks on a stepped spiral orbit and bounces them off one another | The user asked for it explicitly, pointing at the block and at the shapes bumping like a bouncy castle. It is **not** a third marquee region: no strip of repeating content translates, so §5.2's *two marquee regions* rule stands unchanged rather than being quietly bent. The §3 row disables it under reduced motion, matching the arc, the drift, the marquee and the reveals. |
+| §3, restrained motion: decorative loops do not ship | The hero's brand block simulates its four marks as colliding bodies that traverse the tile and bounce off one another | The user asked for it explicitly, pointing at the block and at the shapes bumping like a bouncy castle. It is **not** a third marquee region: no strip of repeating content translates, so §5.2's *two marquee regions* rule stands unchanged rather than being quietly bent. The §3 row disables it under reduced motion, matching the arc, the drift, the marquee and the reveals. |
 | §5.2 / §3, one marquee per page | The gallery's stacked columns gain a second axis | It is the *same* marquee, in the same section, in the same slot: one region, two axes, and the section gains no other motion. |
 
 ### 5.2 Binding, no exceptions

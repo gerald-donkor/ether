@@ -9,12 +9,12 @@
  * and the four share a `<g data-mark-group>`. Those wrappers are what
  * `MarkSpiral` transforms, so the path data never has to know it is being
  * animated and this stays a server component. Two nested wrappers because the
- * orbit and the recoil off another shape are separate forces that have to be
- * able to run at once without fighting over the same `x`/`y`.
+ * simulated position and the impact flourish are separate forces that have to
+ * be able to run at once without fighting over the same `x`/`y`.
  *
  * The viewBox is the drawing's own box grown by 24 units left and right and 12
- * up and down: that margin is the headroom for both, and every amplitude in
- * `MarkSpiral` is budgeted against it.
+ * up and down. `MarkSpiral` treats that box as the walls its bodies bounce off,
+ * mapped back through the scale it shrinks the group by to buy them room.
  */
 export function Mark({ className = "" }: { className?: string }) {
   return (
