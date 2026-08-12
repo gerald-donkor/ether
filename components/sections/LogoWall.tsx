@@ -1,6 +1,7 @@
 import Image from "next/image";
 import { Container } from "@/components/ui/Container";
 import { Reveal } from "@/components/motion/Reveal";
+import { LogoMarquee } from "@/components/motion/LogoMarquee";
 
 /**
  * The seven marks from the reference artboard, extracted with their alpha
@@ -24,6 +25,13 @@ const PARTNERS = [
   { src: "/assets/ui/logos/magic-eden.png", name: "Magic Eden", w: 157, h: 27 },
 ];
 
+/**
+ * Four passes of the list, so the track measures four times one pass and a
+ * 25% travel lands exactly on the seam. Passes two through four are decorative
+ * repeats: a screen reader hears seven partners, not twenty-eight.
+ */
+const PASSES = [0, 1, 2, 3];
+
 export function LogoWall() {
   return (
     <section aria-labelledby="partners-title" className="py-20 md:py-28">
@@ -35,22 +43,37 @@ export function LogoWall() {
           >
             Powering tools and integrations from companies all around the world
           </h2>
-
-          <ul className="mt-10 flex flex-wrap items-center justify-center gap-x-9 gap-y-7 md:gap-x-12">
-            {PARTNERS.map((p) => (
-              <li key={p.src}>
-                <Image
-                  src={p.src}
-                  alt={p.name}
-                  width={p.w}
-                  height={p.h}
-                  className="h-5 w-auto opacity-85 md:h-[22px]"
-                />
-              </li>
-            ))}
-          </ul>
         </Reveal>
       </Container>
+
+      {/* Outside Container so the strip runs full bleed and clips at the
+          screen edges, the way the reference screencast does. */}
+      <Reveal className="mt-10">
+        <LogoMarquee>
+          <ul
+            data-logo-marquee
+            className="flex w-max items-center will-change-transform"
+          >
+            {PASSES.map((pass) =>
+              PARTNERS.map((p) => (
+                <li
+                  key={`${pass}-${p.src}`}
+                  aria-hidden={pass > 0 || undefined}
+                  className="mr-9 shrink-0 md:mr-12"
+                >
+                  <Image
+                    src={p.src}
+                    alt={p.name}
+                    width={p.w}
+                    height={p.h}
+                    className="h-5 w-auto opacity-85 md:h-[22px]"
+                  />
+                </li>
+              )),
+            )}
+          </ul>
+        </LogoMarquee>
+      </Reveal>
     </section>
   );
 }

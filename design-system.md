@@ -183,12 +183,13 @@ Restrained and motivated. Every animation below has a stated reason; anything wi
 | Tile hover | `scale(1.02)`, 200ms | Confirms the tile is a target |
 | Stat scroll-in | Count-up + fade, once | The numbers *are* the section's argument |
 | Ambient arc | 40s rotation, `opacity ≤ 0.5` | Signals a live/generative system |
-| Gallery | Slow horizontal drift, pauses on hover. The two stacked columns also counter-scroll vertically, 22s up and 26s down | Communicates breadth without demanding attention. The second axis gives that breadth depth without opening a second marquee region, and the still full-height photos beside it are what make the movement read |
+| Gallery | Slow horizontal drift, pauses on hover. The two stacked columns also counter-scroll vertically, 22s up and 26s down | Communicates breadth without demanding attention. The second axis gives that breadth depth, and the still full-height photos beside it are what make the movement read |
+| Logo wall | Continuous right-to-left marquee, ~60px/s, full-bleed, never pauses | The row's argument is breadth of adoption, and a row that keeps producing new names argues it better than a row of seven that fits on one line |
 | Button `:active` | `scale(0.98)` | Tactile feedback |
 
 Easing: `cubic-bezier(0.16, 1, 0.3, 1)`. Springs only on hover physics.
 
-**One marquee per page** - the gallery holds that slot. `prefers-reduced-motion: reduce` disables the arc rotation, the gallery drift, and all scroll reveals; the count-up snaps to its final value.
+**Two marquee regions, both ambient** - the gallery on both its axes, and the logo wall on one. `prefers-reduced-motion: reduce` disables the arc rotation, the gallery drift, the logo wall marquee, and all scroll reveals; the count-up snaps to its final value.
 
 ---
 
@@ -218,7 +219,8 @@ From `.agents/skills`. Where the brief and a skill default disagree, the brief w
 | §9.A: no neon or outer glows | The ambient arc ships | It is a drawn element of the reference, not decoration added to make the page "feel designed". Capped at `opacity: 0.5`. |
 | §8: never ship dark-only | The page is dark-locked | The reference has no light mode. Recorded in §6 of this document as a deliberate lock, not an omission. |
 | §9.F: no labels overlaid on images | The `AI Generator` caption sits on the macaw tile | It is in the reference artboard. It is the only image overlay on the page. |
-| §5.2 / §3, one marquee per page | The gallery's stacked columns gain a second axis | It is the *same* marquee, in the same section, in the same slot. One region of the page moves, not two, and no other section gains motion. |
+| §5.2 / §3, one marquee per page | The logo wall becomes a second marquee region | The user asked for it explicitly, pointing at the partner row and at the target behaviour in the reference screencast. Per `AGENTS.md` §1 an explicit user request overrides the rule, so the rule is not silently bent: it is retired and rewritten as **two marquee regions, both ambient**. |
+| §5.2 / §3, one marquee per page | The gallery's stacked columns gain a second axis | It is the *same* marquee, in the same section, in the same slot: one region, two axes, and the section gains no other motion. |
 
 ### 5.2 Binding, no exceptions
 
@@ -228,12 +230,12 @@ From `.agents/skills`. Where the brief and a skill default disagree, the brief w
 - **No div-based fake product UI** (§9.E). The prompt field is a real `<input>`, not a mocked-up screenshot.
 - **No `window.addEventListener('scroll')`, no `useState` for continuous values** (§5.D, §3.B). Motion values and `whileInView` only.
 - **Animate `transform` and `opacity` only** (§6.A). Never `width`, `height`, `top`, `left`.
-- **One marquee per page** (§5). The gallery holds it, on both of its axes; see the §5.1 row.
+- **Two marquee regions, both ambient** (§5). The gallery on both of its axes, and the logo wall on one; see the §5.1 rows. No third region opens.
 - **Eyebrow budget** (§4.7): at most one per three sections. Seven sections allow three; we spend one.
 - **No three equal feature cards** (§9.C). The feature row is two asymmetric panels, and the hero grid is five unequal cells.
 - **Documented z-index scale** (§6.F) in `lib/z.ts`. No arbitrary `z-50`.
 - **No invented numbers** (§4.9). Only `10.2M+`, `300+`, `1000+`, `48,000`, all from the reference.
-- **Reduced motion collapses everything** (§6.B). Arc, drift, reveals, count-up.
+- **Reduced motion collapses everything** (§6.B). Arc, drift, logo wall marquee, reveals, count-up.
 
 ### 5.3 Performance rules that bite here
 
