@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import Image from "next/image";
 import { ArrowUpRight } from "@phosphor-icons/react/dist/ssr/ArrowUpRight";
 import { Mark } from "@/components/brand/Mark";
+import { MarkSpiral } from "@/components/motion/MarkSpiral";
 import { Container } from "@/components/ui/Container";
 import { z } from "@/lib/z";
 
@@ -89,7 +90,9 @@ export function Hero() {
                 className="rounded-card flex min-h-[170px] items-center justify-center overflow-hidden p-6 lg:col-span-4"
                 style={{ background: "var(--grad-block)" }}
               >
-                <Mark className="h-auto w-[70%] max-w-[240px]" />
+                <MarkSpiral>
+                  <Mark className="h-auto w-[79%] max-w-[240px]" />
+                </MarkSpiral>
               </div>
 
               {/* Community */}
