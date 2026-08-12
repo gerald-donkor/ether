@@ -183,7 +183,7 @@ Restrained and motivated. Every animation below has a stated reason; anything wi
 | Tile hover | `scale(1.02)`, 200ms | Confirms the tile is a target |
 | Stat scroll-in | Count-up + fade, once | The numbers *are* the section's argument |
 | Ambient arc | 40s rotation, `opacity ≤ 0.5` | Signals a live/generative system |
-| Gallery | Slow horizontal drift, pauses on hover | Communicates breadth without demanding attention |
+| Gallery | Slow horizontal drift, pauses on hover. The two stacked columns also counter-scroll vertically, 22s up and 26s down | Communicates breadth without demanding attention. The second axis gives that breadth depth without opening a second marquee region, and the still full-height photos beside it are what make the movement read |
 | Button `:active` | `scale(0.98)` | Tactile feedback |
 
 Easing: `cubic-bezier(0.16, 1, 0.3, 1)`. Springs only on hover physics.
@@ -218,6 +218,7 @@ From `.agents/skills`. Where the brief and a skill default disagree, the brief w
 | §9.A: no neon or outer glows | The ambient arc ships | It is a drawn element of the reference, not decoration added to make the page "feel designed". Capped at `opacity: 0.5`. |
 | §8: never ship dark-only | The page is dark-locked | The reference has no light mode. Recorded in §6 of this document as a deliberate lock, not an omission. |
 | §9.F: no labels overlaid on images | The `AI Generator` caption sits on the macaw tile | It is in the reference artboard. It is the only image overlay on the page. |
+| §5.2 / §3, one marquee per page | The gallery's stacked columns gain a second axis | It is the *same* marquee, in the same section, in the same slot. One region of the page moves, not two, and no other section gains motion. |
 
 ### 5.2 Binding, no exceptions
 
@@ -227,7 +228,7 @@ From `.agents/skills`. Where the brief and a skill default disagree, the brief w
 - **No div-based fake product UI** (§9.E). The prompt field is a real `<input>`, not a mocked-up screenshot.
 - **No `window.addEventListener('scroll')`, no `useState` for continuous values** (§5.D, §3.B). Motion values and `whileInView` only.
 - **Animate `transform` and `opacity` only** (§6.A). Never `width`, `height`, `top`, `left`.
-- **One marquee per page** (§5). The gallery holds it.
+- **One marquee per page** (§5). The gallery holds it, on both of its axes; see the §5.1 row.
 - **Eyebrow budget** (§4.7): at most one per three sections. Seven sections allow three; we spend one.
 - **No three equal feature cards** (§9.C). The feature row is two asymmetric panels, and the hero grid is five unequal cells.
 - **Documented z-index scale** (§6.F) in `lib/z.ts`. No arbitrary `z-50`.

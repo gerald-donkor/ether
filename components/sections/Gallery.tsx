@@ -1,6 +1,7 @@
 import Image from "next/image";
 import { Container } from "@/components/ui/Container";
 import { Reveal } from "@/components/motion/Reveal";
+import { ColumnDrift } from "@/components/motion/ColumnDrift";
 
 /**
  * The strip's repeating unit: four columns alternating between a full-height
@@ -14,52 +15,86 @@ type Tile =
   | { kind: "photo"; src: string; alt: string; w: number; h: number }
   | { kind: "data" };
 
-const COLUMNS: Tile[][] = [
-  [
-    { kind: "data" },
-    {
-      kind: "photo",
-      src: "/assets/ui/img/gallery-bruges.jpg",
-      alt: "Stepped gable houses along a canal at dusk.",
-      w: 600,
-      h: 450,
-    },
-  ],
-  [
-    {
-      kind: "photo",
-      src: "/assets/ui/img/gallery-coast.jpg",
-      alt: "A tidal pool below a cliff at sunset, its wall covered in graffiti.",
-      w: 1200,
-      h: 628,
-    },
-  ],
-  [
-    {
-      kind: "photo",
-      src: "/assets/ui/img/gallery-truck.jpg",
-      alt: "A turquoise pickup truck parked under a filling station canopy.",
-      w: 482,
-      h: 600,
-    },
-    {
-      kind: "photo",
-      src: "/assets/ui/img/gallery-crowd.jpg",
-      alt: "A performer lit in violet on a club stage.",
-      w: 1200,
-      h: 1800,
-    },
-  ],
-  [
-    {
-      kind: "photo",
-      src: "/assets/ui/img/gallery-snow.jpg",
-      alt: "A track through snow-covered pines.",
-      w: 600,
-      h: 840,
-    },
-  ],
+/**
+ * A stacked column also scrolls on its own axis. Directions oppose and the
+ * durations are deliberately unequal, so the two stacks never settle into a
+ * lockstep that reads as one sliding sheet. Full-height columns carry no
+ * drift and stay still, which is what makes the contrast legible.
+ */
+type Column = {
+  tiles: Tile[];
+  drift?: { direction: "up" | "down"; duration: number };
+};
+
+const COLUMNS: Column[] = [
+  {
+    drift: { direction: "down", duration: 26 },
+    tiles: [
+      { kind: "data" },
+      {
+        kind: "photo",
+        src: "/assets/ui/img/gallery-bruges.jpg",
+        alt: "Stepped gable houses along a canal at dusk.",
+        w: 600,
+        h: 450,
+      },
+    ],
+  },
+  {
+    tiles: [
+      {
+        kind: "photo",
+        src: "/assets/ui/img/gallery-coast.jpg",
+        alt: "A tidal pool below a cliff at sunset, its wall covered in graffiti.",
+        w: 1200,
+        h: 628,
+      },
+    ],
+  },
+  {
+    drift: { direction: "up", duration: 22 },
+    tiles: [
+      {
+        kind: "photo",
+        src: "/assets/ui/img/gallery-truck.jpg",
+        alt: "A turquoise pickup truck parked under a filling station canopy.",
+        w: 482,
+        h: 600,
+      },
+      {
+        kind: "photo",
+        src: "/assets/ui/img/gallery-crowd.jpg",
+        alt: "A performer lit in violet on a club stage.",
+        w: 1200,
+        h: 1800,
+      },
+    ],
+  },
+  {
+    tiles: [
+      {
+        kind: "photo",
+        src: "/assets/ui/img/gallery-snow.jpg",
+        alt: "A track through snow-covered pines.",
+        w: 600,
+        h: 840,
+      },
+    ],
+  },
 ];
+
+/** Pass A then pass B, the vertical counterpart of the track's two passes. */
+const PASSES = [0, 1];
+
+const COLUMN_WIDTH = "mr-1 w-[220px] shrink-0 sm:w-[280px] lg:w-[340px]";
+
+/**
+ * Against the stack's `200%` height this is `(H / 2) - 4px` plus a 4px margin,
+ * so one pass of two tiles measures exactly `H` and the stack measures exactly
+ * `2H`. Margins rather than flex `gap`, for the same reason the track uses
+ * them: two passes must measure exactly twice one pass or the loop shows a seam.
+ */
+const STACK_TILE = "mb-1 h-[calc(25%-4px)] shrink-0";
 
 function DataTile() {
   return (
@@ -73,36 +108,98 @@ function DataTile() {
 }
 
 /**
+ * A column that scrolls vertically. The outer element is the viewport and
+ * keeps the column's place in the flex row, so the horizontal drift is
+ * untouched; the inner stack is what GSAP moves.
+ */
+function StackedColumn({
+  column,
+  hidden,
+}: {
+  column: Column & { drift: NonNullable<Column["drift"]> };
+  hidden: boolean;
+}) {
+  return (
+    <div
+      aria-hidden={hidden || undefined}
+      className={`relative overflow-hidden ${COLUMN_WIDTH}`}
+    >
+      <div
+        data-column-drift={column.drift.direction}
+        data-drift-duration={column.drift.duration}
+        className="flex h-[200%] flex-col will-change-transform"
+      >
+        {PASSES.map((pass) =>
+          column.tiles.map((tile, ti) => {
+            // The second pass is the loop's seam filler. It repeats what pass
+            // A already said, so it is hidden from assistive technology.
+            const repeat = pass === 1;
+
+            return tile.kind === "data" ? (
+              <div
+                key={`${pass}-${ti}`}
+                aria-hidden={repeat || undefined}
+                className={STACK_TILE}
+              >
+                <DataTile />
+              </div>
+            ) : (
+              <Image
+                key={`${pass}-${ti}`}
+                src={tile.src}
+                alt={hidden || repeat ? "" : tile.alt}
+                aria-hidden={repeat || undefined}
+                width={tile.w}
+                height={tile.h}
+                className={`${STACK_TILE} w-full object-cover`}
+              />
+            );
+          }),
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
  * Gaps are margins rather than flex `gap`, so that two passes of this track
  * measure exactly twice one pass and the -50% loop lands seamlessly.
  */
 function Track({ hidden = false }: { hidden?: boolean }) {
   return (
     <>
-      {COLUMNS.map((column, ci) => (
-        <div
-          key={ci}
-          aria-hidden={hidden || undefined}
-          className="mr-1 flex w-[220px] shrink-0 flex-col gap-1 sm:w-[280px] lg:w-[340px]"
-        >
-          {column.map((tile, ti) =>
-            tile.kind === "data" ? (
-              <div key={ti} className="min-h-0 flex-1">
-                <DataTile />
-              </div>
-            ) : (
-              <Image
-                key={ti}
-                src={tile.src}
-                alt={hidden ? "" : tile.alt}
-                width={tile.w}
-                height={tile.h}
-                className="min-h-0 w-full flex-1 object-cover"
-              />
-            ),
-          )}
-        </div>
-      ))}
+      {COLUMNS.map((column, ci) =>
+        column.drift ? (
+          <StackedColumn
+            key={ci}
+            column={{ ...column, drift: column.drift }}
+            hidden={hidden}
+          />
+        ) : (
+          <div
+            key={ci}
+            aria-hidden={hidden || undefined}
+            className={`flex flex-col gap-1 ${COLUMN_WIDTH}`}
+          >
+            {column.tiles.map((tile, ti) =>
+              tile.kind === "data" ? (
+                <div key={ti} className="min-h-0 flex-1">
+                  <DataTile />
+                </div>
+              ) : (
+                <Image
+                  key={ti}
+                  src={tile.src}
+                  alt={hidden ? "" : tile.alt}
+                  width={tile.w}
+                  height={tile.h}
+                  className="min-h-0 w-full flex-1 object-cover"
+                />
+              ),
+            )}
+          </div>
+        ),
+      )}
     </>
   );
 }
@@ -122,14 +219,16 @@ export function Gallery() {
       </Container>
 
       {/* Full bleed, past both viewport edges. */}
-      <div className="group mt-10 overflow-hidden">
-        <div className="flex h-[420px] w-max motion-safe:animate-(--animate-drift) motion-safe:group-hover:[animation-play-state:paused] md:h-[520px]">
-          <Track />
-          {/* The second pass is what makes the loop seamless. It carries no
-              information, so it is hidden from assistive technology. */}
-          <Track hidden />
+      <ColumnDrift>
+        <div className="group mt-10 overflow-hidden">
+          <div className="flex h-[420px] w-max motion-safe:animate-(--animate-drift) motion-safe:group-hover:[animation-play-state:paused] md:h-[520px]">
+            <Track />
+            {/* The second pass is what makes the loop seamless. It carries no
+                information, so it is hidden from assistive technology. */}
+            <Track hidden />
+          </div>
         </div>
-      </div>
+      </ColumnDrift>
     </section>
   );
 }
