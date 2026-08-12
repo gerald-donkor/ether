@@ -10,17 +10,22 @@ gsap.registerPlugin(useGSAP);
  * Runs the hero's four brand marks as four rigid bodies that travel the tile
  * and bounce off one another.
  *
- * This is a simulation, not a set of orbits. Each shape is a circle with a
- * position, a velocity, a spin and a mass, integrated on `gsap.ticker` against
- * the frame's own delta and written back as `x`/`y`/`rotation` on
- * `[data-mark-shape]`. Nothing is keyframed, so where a shape goes is decided
- * by what it hits.
+ * This is a simulation, not a set of orbits. Each shape has a permissive circle
+ * for body contact and a separate, rotation-safe visual circle for containment,
+ * plus a position, velocity, spin and mass. Those values are integrated on
+ * `gsap.ticker` against the frame's own delta and written back as
+ * `x`/`y`/`rotation` on `[data-mark-shape]`. Nothing is keyframed, so where a
+ * shape goes is decided by what it hits.
  *
  * The drawing has no slack: the four paths interlock and fill the viewBox, so
  * at rest their bodies overlap and there is nowhere to travel. `[data-mark-group]`
  * is therefore scaled down about the composition centre once motion starts,
- * which buys the room, and the walls are the viewBox mapped back through that
- * scale so no shape can ever cross the tile edge. Because the bodies start
+ * which buys the room. Each visual circle comes from the farthest corner of the
+ * shape's untransformed bounding box, with the impact shift included. Its safe
+ * room maps the viewBox back through the group scale and conservatively covers
+ * the full 1.2 degree group swing. Containment runs after pair separation and
+ * immediately before the transform writes, so no collision can push visible
+ * geometry back outside for a rendered frame. Because the bodies start
  * interlocked, separation is capped per frame: the mark loads exactly as it is
  * drawn and unwinds into motion over the first half second rather than
  * exploding apart on frame one.
@@ -99,20 +104,59 @@ type Body = {
   vy: number;
   rotation: number;
   spin: number;
+  /** Permissive radius used only for body-to-body contact. */
   r: number;
+  /** Rotation-safe visual radius used only for frame containment. */
+  visualR: number;
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
   m: number;
 };
 
 /**
- * The walls: the viewBox mapped back through the group scale, so a body that
- * stops at this boundary sits exactly on the rendered tile's edge.
+ * Builds a conservative local safe room for one visual circle. The coupled
+ * equations reserve enough horizontal room for the maximum vertical swing and
+ * enough vertical room for the maximum horizontal swing. After the group scale
+ * and any rotation from -GROUP_SWING to +GROUP_SWING are composed, the visual
+ * circle still sits inside all four viewBox edges.
  */
-const ROOM = {
-  minX: CENTRE_X - VIEW.w / 2 / GROUP_SCALE,
-  maxX: CENTRE_X + VIEW.w / 2 / GROUP_SCALE,
-  minY: CENTRE_Y - VIEW.h / 2 / GROUP_SCALE,
-  maxY: CENTRE_Y + VIEW.h / 2 / GROUP_SCALE,
-};
+function getSafeRoom(visualR: number) {
+  const swing = (GROUP_SWING * Math.PI) / 180;
+  const sin = Math.sin(swing);
+  const determinant = 1 - sin * sin;
+  const roomX = VIEW.w / 2 / GROUP_SCALE - visualR;
+  const roomY = VIEW.h / 2 / GROUP_SCALE - visualR;
+  const safeX = (roomX - sin * roomY) / determinant;
+  const safeY = (roomY - sin * roomX) / determinant;
+
+  return {
+    minX: CENTRE_X - safeX,
+    maxX: CENTRE_X + safeX,
+    minY: CENTRE_Y - safeY,
+    maxY: CENTRE_Y + safeY,
+  };
+}
+
+/** Final frame containment. Reflect only a velocity still travelling outward. */
+function contain(body: Body) {
+  if (body.x < body.minX) {
+    body.x = body.minX;
+    if (body.vx < 0) body.vx = -body.vx;
+  } else if (body.x > body.maxX) {
+    body.x = body.maxX;
+    if (body.vx > 0) body.vx = -body.vx;
+  }
+
+  if (body.y < body.minY) {
+    body.y = body.minY;
+    if (body.vy < 0) body.vy = -body.vy;
+  } else if (body.y > body.maxY) {
+    body.y = body.maxY;
+    if (body.vy > 0) body.vy = -body.vy;
+  }
+}
 
 /** Compresses a shape toward the thing it just hit, then springs it back. */
 function flourish(body: Body, nx: number, ny: number) {
@@ -164,6 +208,8 @@ export function MarkSpiral({ children }: { children: ReactNode }) {
             MIN_RADIUS,
             RADIUS * Math.min(box.width, box.height),
           );
+          const visualR = Math.hypot(box.width / 2, box.height / 2) + BUMP_PUSH;
+          const room = getSafeRoom(visualR);
 
           bodies.push({
             el,
@@ -177,6 +223,8 @@ export function MarkSpiral({ children }: { children: ReactNode }) {
             rotation: 0,
             spin: seed.spin,
             r,
+            visualR,
+            ...room,
             // Mass from area, so the asterisk shoves and the dot is shoved.
             m: r * r,
           });
@@ -218,22 +266,6 @@ export function MarkSpiral({ children }: { children: ReactNode }) {
             body.x += body.vx * dt;
             body.y += body.vy * dt;
             body.rotation += body.spin * dt;
-
-            if (body.x - body.r < ROOM.minX) {
-              body.x = ROOM.minX + body.r;
-              body.vx = Math.abs(body.vx);
-            } else if (body.x + body.r > ROOM.maxX) {
-              body.x = ROOM.maxX - body.r;
-              body.vx = -Math.abs(body.vx);
-            }
-
-            if (body.y - body.r < ROOM.minY) {
-              body.y = ROOM.minY + body.r;
-              body.vy = Math.abs(body.vy);
-            } else if (body.y + body.r > ROOM.maxY) {
-              body.y = ROOM.maxY - body.r;
-              body.vy = -Math.abs(body.vy);
-            }
           }
 
           for (const [a, b] of pairs) {
@@ -289,6 +321,10 @@ export function MarkSpiral({ children }: { children: ReactNode }) {
           }
 
           for (const body of bodies) {
+            // Pair separation can move a body through a wall, so visual
+            // containment is deliberately the last positional authority.
+            contain(body);
+
             const speed = Math.hypot(body.vx, body.vy);
             if (speed < 1e-4) {
               body.vx = MIN_SPEED;
