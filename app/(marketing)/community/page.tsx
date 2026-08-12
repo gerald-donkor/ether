@@ -6,7 +6,7 @@ import { Container } from "@/components/ui/Container";
 export const metadata: Metadata = {
   title: "Community | Ether",
   description:
-    "Ether generations are private today. The public community showcase is not open yet.",
+    "Ether generations are private by default. An owner can publish one image to the gallery on the home page.",
 };
 
 export default function CommunityPage() {
@@ -14,7 +14,7 @@ export default function CommunityPage() {
     <Container>
       <section className="flex min-h-[100dvh] flex-col pt-32 pb-24 md:pt-40 md:pb-32">
         <h1 className="text-text max-w-[900px] text-[clamp(40px,6vw,60px)] leading-[1.45] tracking-[-0.01em]">
-          Your work stays yours while the public space takes shape.
+          Your work stays yours until you decide to show it.
         </h1>
 
         <figure className="mt-12 overflow-hidden rounded-card md:mt-16">
@@ -34,12 +34,13 @@ export default function CommunityPage() {
               Private by default
             </h2>
             <p className="text-text-2 mt-4 max-w-[60ch] text-[15px] leading-[26px]">
-              Generations are visible only to their owner today. A public
-              showcase is not open yet.
+              A generation is visible only to its owner. When you create one,
+              you can opt that single image into the public gallery. The strip
+              on the home page shows the work that has been published.
             </p>
           </div>
-          <Button href="/generate" className="px-6 py-3 text-[15px]">
-            Create privately
+          <Button href="/#gallery-title" className="px-6 py-3 text-[15px]">
+            See the gallery
           </Button>
         </div>
       </section>

@@ -31,10 +31,13 @@ function GenerateButton() {
 export function PromptField({
   action,
   describedBy,
+  showPublishOption = false,
   className = "mt-7",
 }: {
   action?: (formData: FormData) => void | Promise<void>;
   describedBy?: string;
+  /** Real generate form only. The landing page's copy of this field is inert. */
+  showPublishOption?: boolean;
   className?: string;
 }) {
   const id = useId();
@@ -67,6 +70,29 @@ export function PromptField({
         />
         <GenerateButton />
       </div>
+
+      {/* Publication is explicit and off by default. The name and value are
+          the closed pair `lib/validation/generation.ts` accepts; they are
+          written literally here so the marketing bundle does not pull in the
+          schema module and its validator. */}
+      {showPublishOption ? (
+        <div className="mt-3.5 flex items-start gap-2.5">
+          <input
+            id={`${id}-publish`}
+            name="publish"
+            value="public"
+            type="checkbox"
+            className="accent-lime mt-px size-4 shrink-0"
+          />
+          <label
+            htmlFor={`${id}-publish`}
+            className="text-text-2 max-w-[62ch] text-[13px] leading-[20px]"
+          >
+            Show this image in the public gallery on the home page. Your prompt
+            stays private.
+          </label>
+        </div>
+      ) : null}
     </form>
   );
 }

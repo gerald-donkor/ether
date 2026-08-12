@@ -2,6 +2,10 @@ import Image from "next/image";
 import { Container } from "@/components/ui/Container";
 import { Reveal } from "@/components/motion/Reveal";
 import { ColumnDrift } from "@/components/motion/ColumnDrift";
+import {
+  getPublicGalleryImages,
+  type PublicGalleryImage,
+} from "@/lib/db/queries";
 
 /**
  * The strip's repeating unit: four columns alternating between a full-height
@@ -12,7 +16,15 @@ import { ColumnDrift } from "@/components/motion/ColumnDrift";
  * edge to edge, and any rounding would read as a gap. See design-system.md 1.5.
  */
 type Tile =
-  | { kind: "photo"; src: string; alt: string; w: number; h: number }
+  | {
+      kind: "photo";
+      src: string;
+      alt: string;
+      w: number;
+      h: number;
+      /** True for a Blob image, which needs `sizes` the local rasters do not. */
+      remote?: boolean;
+    }
   | { kind: "data" };
 
 /**
@@ -83,6 +95,59 @@ const COLUMNS: Column[] = [
   },
 ];
 
+/**
+ * How many photographs one pass of the strip holds, counted off the columns
+ * rather than written down, so the public read can never ask for more slots
+ * than exist or leave one unconsidered.
+ */
+const PHOTO_SLOT_COUNT = COLUMNS.reduce(
+  (total, column) =>
+    total + column.tiles.filter((tile) => tile.kind === "photo").length,
+  0,
+);
+
+/**
+ * The query deliberately does not read prompts, so there is nothing true to
+ * say about what any of these images shows. This says what the application
+ * actually knows and claims no subject.
+ */
+const PUBLIC_ALT = "An image generated with Ether and published by its owner.";
+
+/** The column widths below, so a Blob image requests the size it renders at. */
+const REMOTE_SIZES = "(min-width: 1024px) 340px, (min-width: 640px) 280px, 220px";
+
+/**
+ * The curation rule, in full: newest public generations first, dropped into
+ * the photographic slots in the order the strip already renders them. Every
+ * slot the database does not fill keeps its artboard image, so zero through
+ * five public rows all produce a complete strip. The 48,000 tile is not a
+ * photographic slot and never comes from the database.
+ */
+function withPublicImages(images: PublicGalleryImage[]): Column[] {
+  if (images.length === 0) return COLUMNS;
+
+  let slot = 0;
+
+  return COLUMNS.map((column) => ({
+    ...column,
+    tiles: column.tiles.map((tile) => {
+      if (tile.kind !== "photo") return tile;
+
+      const image = images[slot++];
+      if (!image) return tile;
+
+      return {
+        kind: "photo" as const,
+        src: image.imageUrl,
+        alt: PUBLIC_ALT,
+        w: image.width,
+        h: image.height,
+        remote: true,
+      };
+    }),
+  }));
+}
+
 /** Pass A then pass B, the vertical counterpart of the track's two passes. */
 const PASSES = [0, 1];
 
@@ -151,6 +216,7 @@ function StackedColumn({
                 aria-hidden={repeat || undefined}
                 width={tile.w}
                 height={tile.h}
+                sizes={tile.remote ? REMOTE_SIZES : undefined}
                 className={`${STACK_TILE} w-full object-cover`}
               />
             );
@@ -165,10 +231,16 @@ function StackedColumn({
  * Gaps are margins rather than flex `gap`, so that two passes of this track
  * measure exactly twice one pass and the -50% loop lands seamlessly.
  */
-function Track({ hidden = false }: { hidden?: boolean }) {
+function Track({
+  columns,
+  hidden = false,
+}: {
+  columns: Column[];
+  hidden?: boolean;
+}) {
   return (
     <>
-      {COLUMNS.map((column, ci) =>
+      {columns.map((column, ci) =>
         column.drift ? (
           <StackedColumn
             key={ci}
@@ -193,6 +265,7 @@ function Track({ hidden = false }: { hidden?: boolean }) {
                   alt={hidden ? "" : tile.alt}
                   width={tile.w}
                   height={tile.h}
+                  sizes={tile.remote ? REMOTE_SIZES : undefined}
                   className="min-h-0 w-full flex-1 object-cover"
                 />
               ),
@@ -204,7 +277,13 @@ function Track({ hidden = false }: { hidden?: boolean }) {
   );
 }
 
-export function Gallery() {
+export async function Gallery() {
+  // The read is the section's own, so the landing page composes unchanged.
+  // A missing database or a failed read resolves to the artboard strip.
+  const columns = withPublicImages(
+    await getPublicGalleryImages(PHOTO_SLOT_COUNT),
+  );
+
   return (
     <section aria-labelledby="gallery-title" className="pb-24 md:pb-32">
       <Container>
@@ -222,10 +301,10 @@ export function Gallery() {
       <ColumnDrift>
         <div className="group mt-10 overflow-hidden">
           <div className="flex h-[420px] w-max motion-safe:animate-(--animate-drift) motion-safe:group-hover:[animation-play-state:paused] md:h-[520px]">
-            <Track />
+            <Track columns={columns} />
             {/* The second pass is what makes the loop seamless. It carries no
                 information, so it is hidden from assistive technology. */}
-            <Track hidden />
+            <Track columns={columns} hidden />
           </div>
         </div>
       </ColumnDrift>

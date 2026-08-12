@@ -46,6 +46,7 @@ export function GeneratorWorkspace({
         <PromptField
           action={formAction}
           describedBy="generation-status"
+          showPublishOption
           className="mt-8 max-w-[760px]"
         />
 
@@ -87,7 +88,9 @@ export function GeneratorWorkspace({
                 ? "Generating your image."
                 : state.error ??
                   (state.generation
-                    ? "Image generated and saved."
+                    ? state.generation.isPublic
+                      ? "Image generated, saved, and published to the public gallery."
+                      : "Image generated and saved. It stays private."
                     : "Your next image will appear here.")}
             </p>
             {state.generation ? (

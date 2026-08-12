@@ -1,18 +1,22 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import { generateImageForPrompt } from "@/lib/ai/generate";
 import { IMAGE_MODEL } from "@/lib/ai/model";
 import {
   countRecentGenerationsForUser,
   createGeneration,
+  PUBLIC_GALLERY_TAG,
 } from "@/lib/db/queries";
 import {
   deleteGenerationImage,
   storeGenerationImage,
 } from "@/lib/storage/generations";
-import { generationPromptSchema } from "@/lib/validation/generation";
+import {
+  generationRequestSchema,
+  PUBLISH_FIELD,
+} from "@/lib/validation/generation";
 
 export type GenerationResult = {
   id: string;
@@ -20,6 +24,7 @@ export type GenerationResult = {
   imageUrl: string;
   width: number;
   height: number;
+  isPublic: boolean;
   createdAt: string;
 };
 
@@ -46,8 +51,9 @@ export async function generateGeneration(
     };
   }
 
-  const parsed = generationPromptSchema.safeParse({
+  const parsed = generationRequestSchema.safeParse({
     prompt: formData.get("prompt"),
+    publish: formData.get(PUBLISH_FIELD),
   });
   if (!parsed.success) {
     return {
@@ -58,6 +64,7 @@ export async function generateGeneration(
   }
 
   const prompt = parsed.data.prompt;
+  const isPublic = parsed.data.publish;
 
   try {
     // This indexed count is a first-line spending cap, not a distributed rate
@@ -116,9 +123,18 @@ export async function generateGeneration(
       model: IMAGE_MODEL,
       width: generated.width,
       height: generated.height,
+      isPublic,
     });
 
     revalidatePath("/generate");
+
+    // A private generation changes nothing anyone else can see, so the
+    // marketing route is left alone. Only a published one expires the
+    // gallery's cached read and the landing page that renders it.
+    if (row.isPublic) {
+      updateTag(PUBLIC_GALLERY_TAG);
+      revalidatePath("/");
+    }
 
     return {
       ok: true,
@@ -129,6 +145,7 @@ export async function generateGeneration(
         imageUrl: row.imageUrl,
         width: row.width,
         height: row.height,
+        isPublic: row.isPublic,
         createdAt: row.createdAt.toISOString(),
       },
     };

@@ -1,0 +1,2 @@
+ALTER TABLE "generations" ADD COLUMN "is_public" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE INDEX "generations_public_created_at_idx" ON "generations" USING btree ("is_public","created_at" DESC NULLS LAST);

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { unstable_cache } from "next/cache";
 import { and, count, desc, eq, gte } from "drizzle-orm";
 import { getDb } from "./index";
 import { generations, type NewGeneration } from "./schema";
@@ -37,6 +38,65 @@ export async function countRecentGenerationsForUser(
     );
 
   return row?.value ?? 0;
+}
+
+/**
+ * The landing gallery's projection. It carries the four fields the strip
+ * renders and nothing else: no owner id, no prompt, no model. Anonymous
+ * visitors read this, so the column list is the privacy boundary.
+ */
+export type PublicGalleryImage = {
+  id: string;
+  imageUrl: string;
+  width: number;
+  height: number;
+};
+
+export async function listPublicGenerations(
+  limit: number,
+): Promise<PublicGalleryImage[]> {
+  return getDb()
+    .select({
+      id: generations.id,
+      imageUrl: generations.imageUrl,
+      width: generations.width,
+      height: generations.height,
+    })
+    .from(generations)
+    .where(eq(generations.isPublic, true))
+    .orderBy(desc(generations.createdAt))
+    .limit(limit);
+}
+
+/**
+ * The one tag the generation action expires after a successful public write.
+ * Cache Components is off in this project, so the documented primitive for a
+ * non-`fetch` read is `unstable_cache` with a tag. There is no polling
+ * interval: the landing gallery only changes when someone publishes.
+ */
+export const PUBLIC_GALLERY_TAG = "public-gallery";
+
+const readPublicGenerations = unstable_cache(
+  async (limit: number) => listPublicGenerations(limit),
+  ["public-gallery"],
+  { tags: [PUBLIC_GALLERY_TAG] },
+);
+
+/**
+ * The failure path is deliberately outside the cached function, so a database
+ * outage is never what gets cached. The landing page falls back to its
+ * artboard images rather than rendering an empty strip or throwing, and the
+ * log line carries no row, prompt, or owner.
+ */
+export async function getPublicGalleryImages(
+  limit: number,
+): Promise<PublicGalleryImage[]> {
+  try {
+    return await readPublicGenerations(limit);
+  } catch {
+    console.error("The public gallery read failed.");
+    return [];
+  }
 }
 
 export async function createGeneration(input: NewGeneration) {
