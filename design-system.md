@@ -204,6 +204,28 @@ screenshot, or community work. Images reserve their intrinsic ratio through
 request state, provider, secret, or user data and add no motion beyond the
 existing link hover and button active feedback.
 
+### 2.10 Footer destination routes
+
+`/grants`, `/generator`, `/careers`, `/disclaimer`, `/services`, `/blog`, and
+`/newsletter` complete the marketing footer as seven public static Server
+Component routes. Their distinct reading families are an asymmetric
+availability threshold, a vertical prompt-to-result path, an empty vacancy
+board, a narrow document column, a scope boundary rail, an empty editorial
+index, and a compact dispatch notice.
+
+The routes state only what the committed product supports. Empty programs,
+roles, publications, and subscriptions remain factual empty states with no
+invented forms, dates, counts, promises, or external destinations. The public
+`/generator` route explains the workflow and links to the protected `/generate`
+tool without duplicating it.
+
+Only `/generator` uses an existing artboard photograph, labelled as a reference
+and rendered through `next/image` without priority. The other routes rely on
+type, spacing, borders, and the established surface token. They read no request
+state, provider, secret, or user data and add no motion. Footer destinations use
+real internal links; unverified social accounts remain non-interactive visual
+lockups until verified URLs exist.
+
 ---
 
 ## 3. Motion

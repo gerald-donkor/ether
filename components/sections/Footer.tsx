@@ -3,6 +3,7 @@ import { InstagramLogo } from "@phosphor-icons/react/dist/ssr/InstagramLogo";
 import { TelegramLogo } from "@phosphor-icons/react/dist/ssr/TelegramLogo";
 import { XLogo } from "@phosphor-icons/react/dist/ssr/XLogo";
 import { YoutubeLogo } from "@phosphor-icons/react/dist/ssr/YoutubeLogo";
+import Link from "next/link";
 import { Wordmark } from "@/components/brand/Wordmark";
 import { Container } from "@/components/ui/Container";
 
@@ -14,9 +15,32 @@ const SOCIALS = [
   { Icon: TelegramLogo, name: "Telegram" },
 ];
 
-const COLUMNS = [
-  { title: "Ether", links: ["Grants", "Generator", "Careers", "Disclaimer"] },
-  { title: "Get connected", links: ["Services", "Blog", "Newsletter"] },
+type FooterDestination = {
+  label: string;
+  href: string;
+};
+
+const COLUMNS: ReadonlyArray<{
+  title: string;
+  links: ReadonlyArray<FooterDestination>;
+}> = [
+  {
+    title: "Ether",
+    links: [
+      { label: "Grants", href: "/grants" },
+      { label: "Generator", href: "/generator" },
+      { label: "Careers", href: "/careers" },
+      { label: "Disclaimer", href: "/disclaimer" },
+    ],
+  },
+  {
+    title: "Get connected",
+    links: [
+      { label: "Services", href: "/services" },
+      { label: "Blog", href: "/blog" },
+      { label: "Newsletter", href: "/newsletter" },
+    ],
+  },
 ];
 
 export function Footer() {
@@ -30,12 +54,12 @@ export function Footer() {
               Managed by Artificial Intelligence
             </p>
             <ul className="mt-5 flex items-center gap-4">
+              {/* Verified account URLs are required before these become links. */}
               {SOCIALS.map(({ Icon, name }) => (
-                <li key={name}>
-                  <a href="#" className="text-text-3 hover:text-text inline-flex transition-colors">
+                <li key={name} className="text-text-3 inline-flex">
+                  <span aria-hidden="true">
                     <Icon size={18} aria-hidden="true" />
-                    <span className="sr-only">{name}</span>
-                  </a>
+                  </span>
                 </li>
               ))}
             </ul>
@@ -48,14 +72,14 @@ export function Footer() {
                   {col.title}
                 </h2>
                 <ul className="mt-5 flex flex-col gap-3">
-                  {col.links.map((link) => (
-                    <li key={link}>
-                      <a
-                        href="#"
+                  {col.links.map(({ label, href }) => (
+                    <li key={href}>
+                      <Link
+                        href={href}
                         className="text-text-3 hover:text-text text-[14px] transition-colors"
                       >
-                        {link}
-                      </a>
+                        {label}
+                      </Link>
                     </li>
                   ))}
                 </ul>
