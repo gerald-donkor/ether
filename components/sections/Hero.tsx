@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { ArrowUpRight } from "@phosphor-icons/react/dist/ssr/ArrowUpRight";
 import { Mark } from "@/components/brand/Mark";
 import { DropletBloom } from "@/components/motion/DropletBloom";
@@ -132,13 +133,13 @@ export function Hero() {
               </div>
 
               {/* Primary action */}
-              <a
-                href="#generate"
+              <Link
+                href="/sign-up"
                 className="rounded-card bg-lime text-ink hover:bg-lime/90 flex min-h-[86px] items-center justify-center gap-2 text-[26px] font-medium transition-transform duration-200 ease-(--ease-out) active:scale-[0.98] sm:col-span-2 lg:col-span-4"
               >
                 Try Free
                 <ArrowUpRight size={24} weight="bold" aria-hidden="true" />
-              </a>
+              </Link>
             </div>
           </div>
         </div>

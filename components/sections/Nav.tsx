@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { Show, UserButton } from "@clerk/nextjs";
 /* Deep imports: the package root is a barrel over ~9000 icons. */
 import { CaretDown } from "@phosphor-icons/react/dist/ssr/CaretDown";
 import { List } from "@phosphor-icons/react/dist/ssr/List";
@@ -43,10 +45,10 @@ export function Nav() {
           aria-label="Main"
           className="flex h-[72px] items-center justify-between"
         >
-          <a href="#top" className="rounded-sm">
+          <Link href="/" className="rounded-sm">
             <Wordmark />
             <span className="sr-only">Ether home</span>
-          </a>
+          </Link>
 
           <ul className="hidden items-center gap-8 lg:flex">
             {LINKS.map((label) => (
@@ -60,6 +62,37 @@ export function Nav() {
                 </a>
               </li>
             ))}
+            <Show when="signed-out">
+              <li>
+                <Link
+                  href="/sign-in"
+                  className="text-text hover:text-text-2 text-[15px] transition-colors"
+                >
+                  Sign in
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/sign-up"
+                  className="bg-lime text-ink rounded-pill inline-flex px-5 py-2.5 text-[14px] font-medium whitespace-nowrap transition-transform duration-200 ease-(--ease-out) active:scale-[0.98]"
+                >
+                  Try Free ↗
+                </Link>
+              </li>
+            </Show>
+            <Show when="signed-in">
+              <li>
+                <Link
+                  href="/generate"
+                  className="text-text hover:text-text-2 text-[15px] transition-colors"
+                >
+                  Generate
+                </Link>
+              </li>
+              <li className="flex items-center">
+                <UserButton />
+              </li>
+            </Show>
           </ul>
 
           <button
@@ -106,6 +139,31 @@ export function Nav() {
                   </a>
                 </li>
               ))}
+              <Show when="signed-out">
+                <li>
+                  <Link href="/sign-in" className="text-text block text-3xl">
+                    Sign in
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/sign-up"
+                    className="bg-lime text-ink rounded-pill inline-flex px-6 py-3 text-[17px] font-medium"
+                  >
+                    Try Free ↗
+                  </Link>
+                </li>
+              </Show>
+              <Show when="signed-in">
+                <li>
+                  <Link href="/generate" className="text-text block text-3xl">
+                    Generate
+                  </Link>
+                </li>
+                <li className="flex items-center gap-3">
+                  <UserButton showName />
+                </li>
+              </Show>
             </ul>
           </Container>
         </div>

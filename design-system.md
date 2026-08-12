@@ -108,6 +108,10 @@ Never set a paragraph wider than `65ch`.
 
 The narrowing after the hero is a real structural move: the masthead is the widest thing on the page and everything below it steps in. Preserve it.
 
+Authenticated application routes use `--container`, not `--container-wide`.
+Their compact shell and form-led content are deliberately narrower than the
+marketing masthead.
+
 **Section rhythm:** `padding-block: 120px` default, `160px` where a section needs to breathe against the ambient glow (the community/stats block). Hero top padding is `40px` below a `72px` nav - the hero must not float.
 
 **Breakpoints:** `sm 640 · md 768 · lg 1024 · xl 1280`. Full-height regions use `min-h-[100dvh]`, never `h-screen`.
@@ -171,6 +175,19 @@ Full-bleed, edge-to-edge, `--r-none`, mixed tile heights, bleeding past both vie
 
 `--ink-raised` plate, `--container-wide`. Wordmark plus `Managed by Artificial Intelligence` and a social icon row on the left; two link columns (`ETHER`, `GET CONNECTED`) on the right under `--text-3` uppercase headings.
 
+### 2.8 Application shell
+
+The authenticated shell uses a compact 64px header over `--container`, with the
+wordmark left and `Generate`, `Account`, and the Clerk user control right. It
+has no marketing footer.
+
+`/generate` is a single form-led column. The title and promoted prompt field
+establish the action, followed by a result region and a three-column history
+grid that collapses to two columns and then one. The result reserves a square
+aspect ratio from first paint, so empty, pending, and filled states occupy the
+same space. Generated-image cards use `--r-card`; the result panel uses
+`--r-panel`. The gallery remains the only `--r-none` surface.
+
 ---
 
 ## 3. Motion
@@ -189,10 +206,11 @@ Restrained and motivated. Every animation below has a stated reason; anything wi
 | Hero photo | Rests at `scale(1.08)` and pans its own slack diagonally, 22s yoyo, against a slower 1.08 → 1.11 breath so the two never sync. On hover it magnifies to 1.18 and tracks the pointer, the frame travelling into whatever the cursor is over; the drift pauses and resumes from where it stopped | It is the page's anchor visual and its largest cell, and it was the one still thing left in a hero where everything around it moves. The magnify is what the photograph is for: the eye and the water beads only exist at that size |
 | Hero photo beads | A drawn svg layer in the image's own pixel space, cropped by `xMidYMid slice` so it tracks the `object-cover` beneath it, marks twenty-three of the real water beads. Each is three parts: a faint halo, a hard specular core placed where the photograph's own highlight sits, and a thin crescent on the far side, the refracted rim light. Four cycles run per bead, none sharing a period: the core wanders 1 to 2 source units on a 4s to 9s lap, flickers on a 2.6s to 5s cycle, the crescent breathes on 3.7s and the halo on 5.6s. Four of the larger beads creep 2 to 5 units downward over 16s to 25s and are returned while dimmed. Every 1.6s to 2.2s a bead necks, snaps back, and releases a teardrop that accelerates 90 to 160 source units down, stretches, drags a wet streak, flattens as it lands and fades. The layer carries the same `data-photo` transform as the picture, so every mark magnifies and drifts locked to its bead | The beads are baked into the photograph and were the one thing in the hero that reads as wet but could not move. The first attempt at this was invisible: a wide soft glow on `screen` adds nothing over a lit leaf, which is where most of these beads are. Small and bright beats large and faint, so nearly all the brightness now sits in a pinpoint two or three source units across. Four unsynced cycles per bead are what make two dozen marks read as water rather than as animation, and the drip is the event the tile is watched for: one to two drops in flight at any moment, never more than three, none reaching the frame edge or the caption |
 | Button `:active` | `scale(0.98)` | Tactile feedback |
+| Generation pending | The existing `--grad-arc` turns inside the reserved result slot at `opacity: 0.5` | Makes a multi-second model call legible without shifting the page or inventing a spinner |
 
 Easing: `cubic-bezier(0.16, 1, 0.3, 1)`. Springs only on hover physics.
 
-**Two marquee regions, both ambient** - the gallery on both its axes, and the logo wall on one. `prefers-reduced-motion: reduce` disables the arc rotation, the gallery drift, the logo wall marquee, the brand block simulation, the hero photo drift and its hover magnify, the bead glint wander, flicker, crescent and halo cycles, the bead creep and the drips, and all scroll reveals; the count-up snaps to its final value. What remains on the macaw is the static bloom, held at its resting values, because the shine is a look rather than a motion, and a still bead should still look wet.
+**Two marquee regions, both ambient** - the gallery on both its axes, and the logo wall on one. `prefers-reduced-motion: reduce` disables the arc rotation, the generation pending rotation, the gallery drift, the logo wall marquee, the brand block simulation, the hero photo drift and its hover magnify, the bead glint wander, flicker, crescent and halo cycles, the bead creep and the drips, and all scroll reveals; the count-up snaps to its final value. What remains on the macaw is the static bloom, held at its resting values, because the shine is a look rather than a motion, and a still bead should still look wet.
 
 ---
 
@@ -266,3 +284,17 @@ From `vercel-react-best-practices`:
 6. **Contrast is checked, not assumed.** Lime never carries white text. Every label clears 4.5:1 against its actual background.
 7. **Loose display leading stays loose.** 1.45-1.5 on H1/H2 is the system, not an oversight.
 8. **Focus is always visible.** Keyboard traversal of the whole page shows a lime ring at every stop.
+
+---
+
+## 7. Backend
+
+Clerk owns identity, Neon stores generation records, Vercel Blob stores the
+generated images, and the Vercel AI Gateway runs the image model. Ether does not
+duplicate Clerk users in Postgres.
+
+Generation ships with an indexed per-owner count over the preceding hour,
+capped at 20 calls. This is a spending floor rather than a distributed limiter;
+Upstash is the documented upgrade path in build step 9. The full schema,
+migration, action flow, model record, and environment contract live in
+`docs/backend.md`.

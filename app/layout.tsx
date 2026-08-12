@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from "next";
+import type { ReactNode } from "react";
+import { ClerkProvider } from "@clerk/nextjs";
 import { Outfit, Tektur } from "next/font/google";
 import "./globals.css";
 
@@ -29,14 +31,34 @@ export const viewport: Viewport = {
   colorScheme: "dark",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html
       lang="en"
       className={`${outfit.variable} ${tektur.variable} h-full antialiased`}
     >
       <body className="bg-ink text-text flex min-h-full flex-col overflow-x-hidden">
-        {children}
+        <ClerkProvider
+          afterSignOutUrl="/"
+          appearance={{
+            variables: {
+              colorPrimary: "var(--color-lime)",
+              colorPrimaryForeground: "var(--color-ink)",
+              colorForeground: "var(--color-text)",
+              colorMutedForeground: "var(--color-text-3)",
+              colorBackground: "var(--color-surface)",
+              colorInput: "var(--color-surface-2)",
+              colorInputForeground: "var(--color-text)",
+              colorBorder: "var(--color-line)",
+              colorRing: "var(--color-lime)",
+              fontFamily: "var(--font-outfit)",
+              fontFamilyButtons: "var(--font-outfit)",
+              borderRadius: "var(--radius-panel)",
+            },
+          }}
+        >
+          {children}
+        </ClerkProvider>
       </body>
     </html>
   );

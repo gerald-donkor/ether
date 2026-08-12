@@ -43,10 +43,10 @@ session that skips the read will re-derive it by hand or silently break it.
 | `prompts/NN-*.md` | the brief each change was executed from, in order. A prompt file is the record of an *intention*, never proof it ran (§12 rule 5) |
 | `public/assets/ui/ref/AI Generator.pdf` / `.svg` | the single 1440 × 3392 pt reference artboard every measurement in `design-system.md` comes from |
 | `README.md` | how to run the project, and the environment variables it needs |
-| `docs/backend.md` | **does not exist yet.** Created by build step 1, and added to this index in that same change — the backend build record: the schema's column types, the migrations, the model id and why, the endpoints, and the environment variables as provisioned |
+| `docs/backend.md` | the backend build record: schema column types, migrations, model choice, actions, routes, environment variables, and verified provider details |
 
-There is no `docs/` directory today and no automation notes file; §3 says what to
-do about that. Do not cite either as though it existed (§12 rule 1).
+There is no automation notes file yet; §3 says what to do about that. Do not
+cite it as though it existed (§12 rule 1).
 
 # Invariants
 
@@ -199,13 +199,14 @@ Scripts that currently exist in `package.json`:
 - `npm run build` — production build
 - `npm run start` — run the production build locally after `npm run build`
 - `npm run lint` — ESLint
+- `npm run db:generate` — generate a Drizzle migration from the schema
+- `npm run db:push` — apply the Drizzle schema with `.env.local` loaded
 
 Report the exact command output; never claim a check passed without running it
 (§12 rule 3).
 
-> **Gaps to flag, not to invent.** There is **no typecheck script, no test
-> runner and no database script in `package.json` today.** Build step 1 adds
-> `db:generate` and `db:push`; anything else is added by the step that needs it
+> **Gaps to flag, not to invent.** There is **no typecheck script or test
+> runner in `package.json` today.** Anything else is added by the step that needs it
 > and this file is corrected in the same change rather than left predicting
 > something that did not happen (§12 rule 8). **Never reference a script name
 > before it exists.** Because only Next.js auto-loads `.env.local`, any script
@@ -290,7 +291,8 @@ and the landing page already makes it: *type a prompt, get an image, keep it.*
 
 `components/ui/PromptField.tsx` in `components/sections/Features.tsx` is the
 promise rendered — a real `<input>` with a real `<label>` and a lime `Generate`
-button — and it currently does nothing. That is the gap this project closes.
+button. It stays inert on the landing page and submits the real generation
+action on `/generate`.
 
 **Register is plain and technical.** The site's voice is confident without
 hype: no exclamation marks, no growth-marketing verbs, nothing breathless about
@@ -298,26 +300,23 @@ AI. Server copy, error messages and empty states match it.
 
 ## 5.1 What is already built
 
-One route. `app/page.tsx` renders seven sections — skip link, `Nav`, `Hero`,
-`LogoWall`, `Features`, `Stats`, `Gallery`, `Footer` — over nine prompts of
-artboard-matched design engineering, with the motion in `components/motion/`
-and the tokens in `app/globals.css`.
+The landing route now lives in `app/(marketing)/page.tsx` with its measured
+sections intact. Prompt 009 adds the Clerk-protected `/generate` and `/account`
+routes, local sign-in and sign-up screens, Drizzle over Neon, Blob storage, and
+the AI Gateway generation action. The detailed build record is
+`docs/backend.md`.
 
-**There is no backend of any kind** — no `app/api`, no database access, no auth,
-no server actions, no `proxy.ts`. Every one of the four nav links
-(`Learn`, `Build`, `Product`, `Community`) is `href="#"`, all seven footer links
-(`Grants`, `Generator`, `Careers`, `Disclaimer`, `Services`, `Blog`,
-`Newsletter`) are `href="#"`, `Try Free ↗` points at nothing, and the prompt
-field swallows its own submit.
+The four marketing nav links and all seven footer links still use `href="#"`.
+Those belong to build steps 2 and 3.
 
 **The providers are provisioned**, against the linked Vercel project `ether`
 (`.vercel/project.json`), and their variables are present in the gitignored
 `.env.local`: Neon (`DATABASE_URL`, `DATABASE_URL_UNPOOLED`), Vercel Blob
 (`BLOB_READ_WRITE_TOKEN`), Clerk (`CLERK_SECRET_KEY`,
 `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`) and the AI Gateway (`VERCEL_OIDC_TOKEN`).
-**Nothing is installed or wired yet** — no `package.json` dependency for any of
-them. Read provisioning state from `vercel env ls` and `vercel integration
-list`, never from this paragraph (§12 rule 5).
+The integration packages are installed and wired by Prompt 009. Read current
+provisioning state from `vercel env ls` and `vercel integration list`, never
+from this paragraph (§12 rule 5).
 
 ## 5.2 The build sequence
 
