@@ -136,12 +136,15 @@ export function LivePhoto({ children }: { children: ReactNode }) {
             if (event.pointerType === "touch") return;
 
             // Only read a resting pose off a running loop. Re-entering during
-            // the leave tween must not record the halfway values.
+            // the leave tween must not record the halfway values. `getProperty`
+            // wants a single element, and every target shares one transform,
+            // so the first one speaks for the set.
             if (!pan.paused()) {
+              const lead = photo[0];
               resting = {
-                xPercent: gsap.getProperty(photo, "xPercent") as number,
-                yPercent: gsap.getProperty(photo, "yPercent") as number,
-                scale: gsap.getProperty(photo, "scale") as number,
+                xPercent: gsap.getProperty(lead, "xPercent") as number,
+                yPercent: gsap.getProperty(lead, "yPercent") as number,
+                scale: gsap.getProperty(lead, "scale") as number,
               };
             }
 
