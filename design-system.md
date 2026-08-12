@@ -188,6 +188,22 @@ aspect ratio from first paint, so empty, pending, and filled states occupy the
 same space. Generated-image cards use `--r-card`; the result panel uses
 `--r-panel`. The gallery remains the only `--r-none` surface.
 
+### 2.9 Marketing information routes
+
+`/learn`, `/build`, `/product`, and `/community` extend the marketing shell as
+four static Server Component routes. They use `--container`, the established
+type roles, the 4px spacing scale, and the existing radius tokens. Each route
+has a separate reading family: an offset field guide, a horizontal prompt
+assembly bench, a sparse capability ledger, and a one-screen editorial
+threshold page.
+
+All route photography is reused from `public/assets/ui/img/` as an artboard
+visual reference. It is not described as an Ether generation, a product
+screenshot, or community work. Images reserve their intrinsic ratio through
+`next/image`, set responsive `sizes`, and do not use priority. The pages read no
+request state, provider, secret, or user data and add no motion beyond the
+existing link hover and button active feedback.
+
 ---
 
 ## 3. Motion

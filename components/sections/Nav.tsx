@@ -11,7 +11,12 @@ import { Wordmark } from "@/components/brand/Wordmark";
 import { Container } from "@/components/ui/Container";
 import { z } from "@/lib/z";
 
-const LINKS = ["Learn", "Build", "Product", "Community"] as const;
+const LINKS = [
+  { label: "Learn", href: "/learn" },
+  { label: "Build", href: "/build" },
+  { label: "Product", href: "/product" },
+  { label: "Community", href: "/community" },
+] as const;
 
 export function Nav() {
   const [open, setOpen] = useState(false);
@@ -51,15 +56,15 @@ export function Nav() {
           </Link>
 
           <ul className="hidden items-center gap-8 lg:flex">
-            {LINKS.map((label) => (
-              <li key={label}>
-                <a
-                  href="#"
+            {LINKS.map(({ label, href }) => (
+              <li key={href}>
+                <Link
+                  href={href}
                   className="text-text hover:text-text-2 flex items-center gap-1.5 text-[15px] transition-colors"
                 >
                   {label}
                   <CaretDown size={12} weight="bold" aria-hidden="true" />
-                </a>
+                </Link>
               </li>
             ))}
             <Show when="signed-out">
@@ -132,22 +137,31 @@ export function Nav() {
               </button>
             </div>
             <ul className="mt-8 flex flex-col gap-6">
-              {LINKS.map((label) => (
-                <li key={label}>
-                  <a href="#" className="text-text block text-3xl">
+              {LINKS.map(({ label, href }) => (
+                <li key={href}>
+                  <Link
+                    href={href}
+                    onClick={() => setOpen(false)}
+                    className="text-text block text-3xl"
+                  >
                     {label}
-                  </a>
+                  </Link>
                 </li>
               ))}
               <Show when="signed-out">
                 <li>
-                  <Link href="/sign-in" className="text-text block text-3xl">
+                  <Link
+                    href="/sign-in"
+                    onClick={() => setOpen(false)}
+                    className="text-text block text-3xl"
+                  >
                     Sign in
                   </Link>
                 </li>
                 <li>
                   <Link
                     href="/sign-up"
+                    onClick={() => setOpen(false)}
                     className="bg-lime text-ink rounded-pill inline-flex px-6 py-3 text-[17px] font-medium"
                   >
                     Try Free ↗
@@ -156,7 +170,11 @@ export function Nav() {
               </Show>
               <Show when="signed-in">
                 <li>
-                  <Link href="/generate" className="text-text block text-3xl">
+                  <Link
+                    href="/generate"
+                    onClick={() => setOpen(false)}
+                    className="text-text block text-3xl"
+                  >
                     Generate
                   </Link>
                 </li>
