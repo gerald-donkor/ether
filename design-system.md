@@ -139,7 +139,36 @@ There are no drop shadows on this page. Depth comes from fill value (`--ink` →
 
 ### 2.1 Navigation
 
-72px tall, `--container-wide`, wordmark left, five menu items right with chevrons. Single line at `lg` and above - condense labels before wrapping. Below `md`, collapse to a hamburger with a full-screen `--ink` panel. Transparent over the hero wash; no border.
+72px tall, `--container-wide`, wordmark left, four route disclosures followed
+by the current auth controls. The closed navigation stays on one line at `lg`
+and above, transparent over the hero wash and without a border. Below `lg`, it
+collapses to the existing full-screen `--ink` dialog.
+
+Each desktop disclosure keeps the original 15px label and caret as one native
+button. Its panel is a 360px wide `--surface` route index with a 1px `--line`
+boundary, `--r-panel`, and 12px inset. Destination links use a 14px title and
+13px/22px description, with 4px between them and `--surface-2` hover and focus
+feedback. A 4px padded wrapper joins the trigger to the panel without a pointer
+gap. Learn aligns left; Build, Product, and Community align right so the fixed
+width remains within the wide container down to the `lg` boundary.
+
+Only one desktop panel opens at a time. Click toggles it; pointer entry and
+focus open it; leaving closes it only when focus is no longer inside. Escape
+closes and restores trigger focus, pointer input outside closes, and selecting
+a link closes before navigation. The controls retain native button and link
+semantics, normal Tab order, `aria-expanded`, and unique `aria-controls`; they
+do not use ARIA menu roles.
+
+The mobile dialog presents the same four labels as 30px disclosure buttons,
+with one expanded section at a time. Descriptive links sit beneath each trigger
+on one indented `--line` boundary, using the same 14px title and 13px/22px
+description roles. The route list scrolls independently beneath the fixed 72px
+dialog header so its close button and final auth controls remain reachable on
+short screens. Selecting a destination closes the dialog, and the existing
+Escape, body scroll lock, and hamburger focus-return behavior remains.
+
+The disclosures add no token and no automatic motion. Opening is an immediate
+state change, the caret does not rotate, and §3 gains no row.
 
 ### 2.2 Buttons
 
