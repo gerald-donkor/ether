@@ -30,14 +30,13 @@ The application reads these variables:
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`: public Clerk instance identifier.
 - `NEXT_PUBLIC_CLERK_SIGN_IN_URL`: `/sign-in`.
 - `NEXT_PUBLIC_CLERK_SIGN_UP_URL`: `/sign-up`.
-- `VERCEL_OIDC_TOKEN`: Vercel-managed AI Gateway authentication. Vercel injects
-  this during deployments and `vercel env pull` provides it locally.
+- `CLOUDFLARE_ACCOUNT_ID`: server-side Workers AI account identifier.
+- `CLOUDFLARE_API_TOKEN`: server-side Workers AI authentication.
 
 `.env.local` is ignored by Git. Do not commit provider credentials.
 
-The linked Vercel team must also have a valid credit card on file before AI
-Gateway image requests can run. Without it, Vercel returns
-`customer_verification_required` and the app shows a handled generation error.
+Workers AI prompt, image, and moderation requests share the account's provider
+capacity. The application reserves that capacity before making a model call.
 
 ## Commands
 
@@ -45,6 +44,8 @@ Gateway image requests can run. Without it, Vercel returns
 - `npm run build`: create a production build.
 - `npm run start`: run a completed production build.
 - `npm run lint`: run ESLint.
+- `npm test`: run environment-free moderation parser and validation tests.
+- `npm run test:db`: run moderation and quota integration checks with `.env.local`.
 - `npm run db:generate`: generate a migration from the Drizzle schema.
 - `npm run db:migrate`: apply committed migrations with `.env.local` loaded.
 - `npm run db:push`: apply the Drizzle schema with `.env.local` loaded.

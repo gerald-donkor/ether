@@ -1,6 +1,15 @@
 import "server-only";
 
 import { getModel, getModelSize } from "./catalog";
+import {
+  IMAGE_MODERATION_MODEL_ID,
+  IMAGE_MODERATION_POLICY,
+  parseImageModeration,
+  parsePromptModeration,
+  PROMPT_MODERATION_MODEL_ID,
+  type ModerationCategory,
+  type ModerationDecision,
+} from "./moderation";
 
 const CLOUDFLARE_ACCOUNTS_ENDPOINT =
   "https://api.cloudflare.com/client/v4/accounts";
@@ -29,6 +38,74 @@ type CloudflareRunResponse = {
   errors?: { code?: number; message?: string }[];
   result?: { image?: string };
 };
+
+type ModerationRunResponse = {
+  success?: boolean;
+  errors?: { code?: number; message?: string }[];
+  result?: {
+    response?: unknown;
+    result?: { answer?: unknown };
+  };
+};
+
+async function runModerationModel(model: string, body: unknown) {
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+  if (!accountId || !apiToken) return null;
+
+  try {
+    const response = await fetch(
+      `${CLOUDFLARE_ACCOUNTS_ENDPOINT}/${accountId}/ai/run/${model}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(30_000),
+      },
+    );
+    if (!response.ok) return null;
+    const payload = (await response.json()) as ModerationRunResponse;
+    return payload.success === true ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function screenPrompt(prompt: string): Promise<ModerationDecision> {
+  const payload = await runModerationModel(PROMPT_MODERATION_MODEL_ID, {
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0,
+    max_tokens: 16,
+  });
+  return parsePromptModeration(payload?.result?.response);
+}
+
+export async function screenImage({
+  bytes,
+  mediaType,
+  reportedCategory,
+}: {
+  bytes: Uint8Array;
+  mediaType: "image/png" | "image/jpeg";
+  reportedCategory?: ModerationCategory;
+}): Promise<ModerationDecision> {
+  const categoryContext = reportedCategory
+    ? ` The report category is ${reportedCategory}. Apply the same policy and do not assume the report is correct.`
+    : "";
+  const payload = await runModerationModel(IMAGE_MODERATION_MODEL_ID, {
+    task: "query",
+    image: `data:${mediaType};base64,${Buffer.from(bytes).toString("base64")}`,
+    question: `${IMAGE_MODERATION_POLICY}${categoryContext}`,
+    reasoning: false,
+    temperature: 0,
+    max_tokens: 16,
+    stream: false,
+  });
+  return parseImageModeration(payload?.result?.result?.answer);
+}
 
 function readPngDimensions(bytes: Uint8Array) {
   const pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
@@ -74,7 +151,9 @@ function readJpegDimensions(bytes: Uint8Array) {
  * so the header cannot be trusted either. The media type decides the stored
  * file's extension, so guessing it would write a mislabelled blob.
  */
-function readImage(bytes: Uint8Array) {
+function readImage(
+  bytes: Uint8Array,
+): { mediaType: "image/png" | "image/jpeg"; width: number; height: number } | null {
   const png = readPngDimensions(bytes);
   if (png) return { mediaType: "image/png", ...png };
 

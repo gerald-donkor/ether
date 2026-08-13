@@ -6,7 +6,13 @@ import { getModel } from "@/lib/ai/catalog";
 import {
   generateImageForPrompt,
   ImageGenerationError,
+  screenImage,
+  screenPrompt,
 } from "@/lib/ai/generate";
+import {
+  IMAGE_MODERATION_PROVIDER_UNITS,
+  PROMPT_MODERATION_PROVIDER_UNITS,
+} from "@/lib/ai/moderation";
 import {
   createGeneration,
   PUBLIC_GENERATIONS_TAG,
@@ -93,7 +99,9 @@ export async function generateGeneration(
     return failure("Usage could not be checked. Try again shortly.");
   }
 
-  const providerUnits = model.providerUnitsPerImage * count;
+  const providerUnits =
+    PROMPT_MODERATION_PROVIDER_UNITS +
+    (model.providerUnitsPerImage + IMAGE_MODERATION_PROVIDER_UNITS) * count;
   const quota = await reserveGenerationQuota({
     userId,
     model: modelId,
@@ -116,6 +124,16 @@ export async function generateGeneration(
 
   if (quota.status === "unavailable") {
     return failure("Usage could not be checked. Try again shortly.");
+  }
+
+  const promptDecision = await screenPrompt(prompt);
+  if (promptDecision.status === "unsafe") {
+    return failure(
+      "This prompt cannot be used. Revise it and remove unsafe content.",
+    );
+  }
+  if (promptDecision.status === "unavailable") {
+    return failure("The prompt could not be checked. Try again later.");
   }
 
   const generations: GenerationResult[] = [];
@@ -144,6 +162,19 @@ export async function generateGeneration(
       lastError = providerUnavailable
         ? "The generator is unavailable right now. Try again later."
         : "The image could not be generated. Revise the prompt or try again.";
+      continue;
+    }
+
+    const outputDecision = await screenImage({
+      bytes: generated.bytes,
+      mediaType: generated.mediaType,
+    });
+    if (outputDecision.status !== "safe") {
+      failed += 1;
+      lastError =
+        outputDecision.status === "unsafe"
+          ? "An image was withheld because it did not pass the safety check."
+          : "An image could not be checked. Try again later.";
       continue;
     }
 

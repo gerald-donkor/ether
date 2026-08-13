@@ -16,7 +16,7 @@ function formatResetTime(date: Date) {
 }
 
 function formatProviderUnits(units: number) {
-  return new Intl.NumberFormat("en", { maximumFractionDigits: 1 }).format(
+  return new Intl.NumberFormat("en", { maximumFractionDigits: 2 }).format(
     units / PROVIDER_UNITS_PER_NEURON,
   );
 }

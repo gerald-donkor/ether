@@ -352,6 +352,22 @@ control. Private and removed records are 404. The route uses its own compact
 public shell so shareability is a row decision rather than an authenticated
 layout decision.
 
+That visitor action row also carries one quiet `Report` link after Download.
+It opens `/g/[id]/report`, a text-only extension of the same 880px record
+family: the established heading role, one hairline, one native closed reason
+select, a lime Submit report action and a ghost Back to image action. The page
+never renders the image, prompt, owner, Blob URL, model decision or report
+count. Anonymous visitors receive a sign-in link, while the Server Action
+independently requires a session.
+
+The report result uses one mounted, focusable `role="status"` region for
+validation, pending-check, duplicate, accepted and removed outcomes. Controls
+disable after an accepted or duplicate result. A confirmed unsafe result
+removes the generation from every owner and public surface through its
+takedown state without deleting the row or Blob; an unavailable check leaves
+the image live. No colour carries the result, and no motion, token, radius,
+icon or z-index level is added.
+
 A second hairline separates the action row: `Download` and `Delete`, both the
 existing ghost pill. **The destructive control does not become a new colour.**
 Two accents stay locked, so the words carry the weight, and delete is a

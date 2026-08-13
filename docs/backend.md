@@ -1236,3 +1236,129 @@ Not run, and why:
 - **Landing motion in a browser.** No settled landing component or motion file
   changed, and the environment-absent server-rendered document is identical,
   but motion playback was not re-recorded in this prompt.
+
+## Moderation and abuse handling, prompt 022
+
+Implemented on 2026-08-13. Cloudflare Workers AI remains the only model
+provider, and `lib/ai/generate.ts` remains the only module that reads its two
+credentials or calls a model.
+
+### Provider models, policy and metering
+
+- Prompt screening uses `@cf/meta/llama-guard-3-8b`. Its live model page was
+  checked on 2026-08-13 and listed it as Cloudflare-hosted, not deprecated,
+  with prices of $0.484 per million input tokens and $0.030 per million output
+  tokens. A synthetic safe REST probe returned HTTP 200, `success: true`,
+  `result.response`, usage fields, and `cf-ai-neurons: 9.16`.
+- Image screening uses `@cf/moondream/moondream3.1-9B-A2B`. Its live page was
+  checked on 2026-08-13 and documented a base64 data URI or public HTTPS URL,
+  the non-streaming query task, and no license-acceptance gate. The pricing
+  table listed 27,273 neurons per million input tokens and 90,909 per million
+  output tokens. A synthetic one-pixel PNG probe returned HTTP 200,
+  `success: true`, an answer at `result.result.answer`, usage fields, and
+  `cf-ai-neurons: 21.88` for the final bounded policy.
+- The closed policy categories are `sexual`, `violence`, `hate`, `self_harm`,
+  `illegal`, and `personal_data`. Prompt parsing accepts only exact Llama Guard
+  `safe` or documented `unsafe` plus S-category output, after removing only
+  surrounding whitespace the live model emits. Image parsing accepts only one
+  of `SAFE`, `SEXUAL`, `VIOLENCE`, `HATE`, `SELF_HARM`, `ILLEGAL`, or
+  `PERSONAL_DATA`. Missing, unknown, malformed,
+  timed-out, non-2xx and `success: false` results are unavailable and fail
+  closed.
+- Provider units now store hundredths of a neuron. Migration 0005 multiplied
+  committed values by 10, changed FLUX's 172.80-neuron reservation from 1,728
+  to 17,280 units, and changed the unchanged 10,000-neuron daily ceiling from
+  100,000 to 1,000,000 units. Prompt and image checks reserve 2,500 units each,
+  conservatively above the measured bounded calls. A generation atomically
+  reserves one prompt check plus each requested image and output check. A first
+  report reserves one image check with `image_count = 0`, so it does not use the
+  reporter's rolling image allowance.
+
+Generation ordering is auth, shared-schema validation, one atomic reservation,
+prompt screen, sequential image generation, output screen, Blob write, row
+write, then revalidation for rows actually written. Unsafe prompts make no
+image call. Unsafe or unavailable output writes no Blob or row and increments
+the existing partial-failure count.
+
+### Schema and lifecycle
+
+Migration `drizzle/0005_lowly_bill_hollister.sql` adds:
+
+- `moderation_category` and `report_result` enums;
+- nullable `generations.takedown_at timestamp with time zone` and
+  `takedown_reason moderation_category`, paired by
+  `generations_takedown_pair`;
+- `reports`: UUID primary key, generation UUID with cascade deletion, reporter
+  Clerk id, closed category, `pending | no_action | takedown` result,
+  `created_at`, and nullable `resolved_at`; `reports_resolution_pair` enforces
+  the timestamp lifecycle and `reports_generation_reporter_idx` uniquely
+  bounds one reporter to one generation;
+- moderation-only usage events through nonnegative `image_count` plus the
+  `usage_events_work_positive` check; and
+- a replacement `reserve_generation_quota` that retains one transaction-level
+  advisory lock, ignores zero-image moderation rows in the rolling image
+  allowance, and includes all provider work in the UTC-day sum.
+
+Report deletion cascades when the owner permanently deletes the generation:
+the report has no independent user-facing subject after the row and Blob are
+erased. Takedown is separate from owner removal. It retains the row and Blob,
+cannot be cleared by visibility or restore, and is excluded in every owner,
+public, shareable, Community, recent-history and library predicate. Permanent
+owner deletion still reads through takedown because that existing data-rights
+path intentionally has no takedown filter. Account inventory counts only live,
+available rows; compute usage includes moderation work and the UI's compute
+label remains truthful.
+
+### Report boundary and data
+
+`/g/[id]/report` reads only the existing shareable projection and renders no
+image, prompt, owner id or Blob URL. The browser sends only generation UUID and
+one closed reason. The action derives the Clerk reporter, validates with the
+same strict Zod schema as the client courtesy check, atomically claims a live
+shareable non-owner row, and treats duplicates idempotently before quota or
+provider work. It fetches the stored image server-side only from the configured
+Vercel Blob generation path, with HTTPS, media-type, timeout and 10 MiB bounds.
+
+The database stores generation id, server-derived reporter id, closed category,
+closed result and lifecycle timestamps. It stores no allegation text, prompt
+copy, email, provider response, confidence, IP address, user agent or request
+body. Cloudflare receives a generation prompt for prompt screening and receives
+image bytes plus fixed policy text for output or report screening. Reporter and
+owner identifiers, email, prompt, Blob URL and report count are not sent.
+
+### Verification, prompt 022
+
+- `npm run lint` exited 0. `npm test` ran four environment-free parser and
+  validation tests with four passes and no failures.
+- `npm run db:generate` created migration 0005. `npm run db:migrate` applied it
+  successfully through the direct connection. Read-only checks returned true
+  for both enums, takedown timestamp and pairing, report resolution pairing,
+  unique report index, moderation usage compatibility and the replaced quota
+  function.
+- `npm run test:db` passed one integration suite in 9.1 seconds. It proved one
+  claim and one duplicate, safe completion, one idempotent takedown, exclusion
+  from recent history, Library, share links, public gallery and Community,
+  blocked visibility and restore bypasses, zero-image provider events, and two
+  concurrent 600,000-unit reservations accepting only one. Synthetic rows were
+  removed in `finally` and cleanup returned zero generation rows.
+- Live synthetic provider probes returned the response envelopes and neuron
+  headers recorded above. They printed no request, response text, token, image
+  bytes or credentials.
+- Turbopack remained blocked by this host's internal port-binding restriction.
+  The documented webpack fallback compiled, passed TypeScript, generated 18
+  pages, and added only dynamic `/g/[id]/report`. The same fallback passed with
+  `.env.local` absent outside the restricted sandbox, and the file was restored.
+- A detached clean build at commit `2e1441e` and a clean current build both
+  produced a 61,314-byte complete server-rendered landing document after only
+  executable build wiring was removed. `diff` returned `IDENTICAL`. Raw HTML
+  differed by two bytes of build wiring only. The route tables differed only by
+  the new dynamic `/g/[id]/report` route.
+- An anonymous production-route check returned HTTP 200 for a temporary
+  unlisted synthetic report target, rendered the report heading and sign-in
+  state, and contained neither the synthetic prompt nor owner id. The row was
+  removed afterward.
+
+Not run at this point: the authenticated two-account browser flow and its focus,
+keyboard, pending, mobile and partial-output states require reusable Clerk
+browser sessions that are not available in this workspace. Those runtime checks
+are not claimed by the database, parser or build results above.

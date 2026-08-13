@@ -42,12 +42,12 @@ export type ImageModel = {
   bodyStyle: "prompt-steps" | "prompt-dimensions";
   /** Measured from a real call, never taken from the model page. */
   responseStyle: "json-base64" | "binary";
-  /** Tenths of a neuron reserved before one provider call. */
+  /** Hundredths of a neuron reserved before one provider call. */
   providerUnitsPerImage: number;
 };
 
 /** The smallest integer scale that represents every verified catalog cost. */
-export const PROVIDER_UNITS_PER_NEURON = 10;
+export const PROVIDER_UNITS_PER_NEURON = 100;
 
 export const IMAGE_MODEL_IDS = [FLUX_SCHNELL_ID, SDXL_LIGHTNING_ID] as const;
 
@@ -74,7 +74,7 @@ export const IMAGE_MODELS: Readonly<Record<ImageModelId, ImageModel>> = {
     sizing: "native",
     bodyStyle: "prompt-steps",
     responseStyle: "json-base64",
-    providerUnitsPerImage: 1728,
+    providerUnitsPerImage: 17280,
     sizes: [
       { key: "square", label: "Square, 1024 x 1024", width: 1024, height: 1024 },
     ],

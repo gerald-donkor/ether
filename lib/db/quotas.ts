@@ -1,11 +1,10 @@
 import "server-only";
 
 import { sql } from "drizzle-orm";
-import type { ImageModelId } from "@/lib/ai/catalog";
 import { getDb } from "./index";
 
 const ACCOUNT_HOURLY_IMAGE_LIMIT = 20;
-const PROVIDER_DAILY_UNITS_LIMIT = 100_000;
+const PROVIDER_DAILY_UNITS_LIMIT = 1_000_000;
 
 type ReservationRow = {
   outcome: unknown;
@@ -97,7 +96,7 @@ export async function reserveGenerationQuota({
   providerUnits,
 }: {
   userId: string;
-  model: ImageModelId;
+  model: string;
   imageCount: number;
   providerUnits: number;
 }): Promise<QuotaReservation> {

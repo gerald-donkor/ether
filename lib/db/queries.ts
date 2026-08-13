@@ -26,7 +26,11 @@ export async function listGenerationsForUser(userId: string, limit = 24) {
     .select()
     .from(generations)
     .where(
-      and(eq(generations.userId, userId), isNull(generations.deletedAt)),
+      and(
+        eq(generations.userId, userId),
+        isNull(generations.deletedAt),
+        isNull(generations.takedownAt),
+      ),
     )
     .orderBy(desc(generations.createdAt))
     .limit(limit);
@@ -37,7 +41,11 @@ export async function countGenerationsForUser(userId: string) {
     .select({ value: count() })
     .from(generations)
     .where(
-      and(eq(generations.userId, userId), isNull(generations.deletedAt)),
+      and(
+        eq(generations.userId, userId),
+        isNull(generations.deletedAt),
+        isNull(generations.takedownAt),
+      ),
     );
 
   return row?.value ?? 0;
@@ -70,6 +78,7 @@ export async function listPublicGenerations(
       and(
         eq(generations.visibility, "public"),
         isNull(generations.deletedAt),
+        isNull(generations.takedownAt),
       ),
     )
     .orderBy(desc(generations.createdAt))
@@ -121,6 +130,7 @@ export async function getGenerationForOwner(id: string, userId: string) {
         eq(generations.id, id),
         eq(generations.userId, userId),
         isNull(generations.deletedAt),
+        isNull(generations.takedownAt),
       ),
     )
     .limit(1);
@@ -158,6 +168,7 @@ export async function getShareableGeneration(
         eq(generations.id, id),
         inArray(generations.visibility, ["unlisted", "public"]),
         isNull(generations.deletedAt),
+        isNull(generations.takedownAt),
       ),
     )
     .limit(1);
@@ -189,6 +200,7 @@ export async function listCommunityGenerations(
       and(
         eq(generations.visibility, "public"),
         isNull(generations.deletedAt),
+        isNull(generations.takedownAt),
       ),
     )
     .orderBy(desc(generations.createdAt))
@@ -229,6 +241,7 @@ export async function setGenerationVisibilityForOwner(
         eq(generations.id, id),
         eq(generations.userId, userId),
         isNull(generations.deletedAt),
+        isNull(generations.takedownAt),
       ),
     )
     .returning({ id: generations.id, visibility: generations.visibility });
@@ -287,6 +300,7 @@ export async function listLibraryPage({
 }) {
   const conditions = [
     eq(generations.userId, userId),
+    isNull(generations.takedownAt),
     removed
       ? isNotNull(generations.deletedAt)
       : isNull(generations.deletedAt),
@@ -325,6 +339,7 @@ export async function softDeleteGenerationForOwner(id: string, userId: string) {
         eq(generations.id, id),
         eq(generations.userId, userId),
         isNull(generations.deletedAt),
+        isNull(generations.takedownAt),
       ),
     )
     .returning({ id: generations.id, visibility: generations.visibility });
@@ -342,6 +357,7 @@ export async function restoreGenerationForOwner(id: string, userId: string) {
         eq(generations.id, id),
         eq(generations.userId, userId),
         isNotNull(generations.deletedAt),
+        isNull(generations.takedownAt),
       ),
     )
     .returning({ id: generations.id, visibility: generations.visibility });

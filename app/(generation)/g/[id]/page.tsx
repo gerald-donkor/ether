@@ -137,6 +137,15 @@ export default async function GenerationPage({
           >
             Download
           </Button>
+          {!isOwner ? (
+            <Button
+              variant="ghost"
+              href={`/g/${generation.id}/report`}
+              className="px-5 py-2.5 text-[14px]"
+            >
+              Report
+            </Button>
+          ) : null}
           {isOwner ? <DeleteGenerationButton id={generation.id} /> : null}
         </div>
       </div>
