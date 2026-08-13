@@ -8,12 +8,14 @@ import {
   eq,
   gte,
   ilike,
+  inArray,
   isNotNull,
   isNull,
   sql,
 } from "drizzle-orm";
 import { getDb } from "./index";
 import { generations, type NewGeneration } from "./schema";
+import type { GenerationVisibility } from "@/lib/generations/visibility";
 
 /**
  * A removed row is invisible everywhere the owner reads their own work, so the
@@ -90,7 +92,10 @@ export async function listPublicGenerations(
     })
     .from(generations)
     .where(
-      and(eq(generations.isPublic, true), isNull(generations.deletedAt)),
+      and(
+        eq(generations.visibility, "public"),
+        isNull(generations.deletedAt),
+      ),
     )
     .orderBy(desc(generations.createdAt))
     .limit(limit);
@@ -102,12 +107,12 @@ export async function listPublicGenerations(
  * non-`fetch` read is `unstable_cache` with a tag. There is no polling
  * interval: the landing gallery only changes when someone publishes.
  */
-export const PUBLIC_GALLERY_TAG = "public-gallery";
+export const PUBLIC_GENERATIONS_TAG = "public-generations";
 
 const readPublicGenerations = unstable_cache(
   async (limit: number) => listPublicGenerations(limit),
-  ["public-gallery"],
-  { tags: [PUBLIC_GALLERY_TAG] },
+  ["public-generations-gallery"],
+  { tags: [PUBLIC_GENERATIONS_TAG] },
 );
 
 /**
@@ -146,6 +151,114 @@ export async function getGenerationForOwner(id: string, userId: string) {
     .limit(1);
 
   return generation;
+}
+
+export type ShareableGeneration = {
+  id: string;
+  imageUrl: string;
+  model: string;
+  width: number;
+  height: number;
+  visibility: Exclude<GenerationVisibility, "private">;
+  createdAt: Date;
+};
+
+/** Anonymous projection for an exact share link. No owner or prompt crosses. */
+export async function getShareableGeneration(
+  id: string,
+): Promise<ShareableGeneration | undefined> {
+  const [generation] = await getDb()
+    .select({
+      id: generations.id,
+      imageUrl: generations.imageUrl,
+      model: generations.model,
+      width: generations.width,
+      height: generations.height,
+      visibility: generations.visibility,
+      createdAt: generations.createdAt,
+    })
+    .from(generations)
+    .where(
+      and(
+        eq(generations.id, id),
+        inArray(generations.visibility, ["unlisted", "public"]),
+        isNull(generations.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  return generation as ShareableGeneration | undefined;
+}
+
+export type CommunityGeneration = {
+  id: string;
+  imageUrl: string;
+  width: number;
+  height: number;
+  createdAt: Date;
+};
+
+export async function listCommunityGenerations(
+  limit: number,
+): Promise<CommunityGeneration[]> {
+  return getDb()
+    .select({
+      id: generations.id,
+      imageUrl: generations.imageUrl,
+      width: generations.width,
+      height: generations.height,
+      createdAt: generations.createdAt,
+    })
+    .from(generations)
+    .where(
+      and(
+        eq(generations.visibility, "public"),
+        isNull(generations.deletedAt),
+      ),
+    )
+    .orderBy(desc(generations.createdAt))
+    .limit(limit);
+}
+
+const readCommunityGenerations = unstable_cache(
+  async (limit: number) => listCommunityGenerations(limit),
+  ["community-generations-v1"],
+  { tags: [PUBLIC_GENERATIONS_TAG] },
+);
+
+export async function getCommunityGenerations(limit: number) {
+  try {
+    const rows = await readCommunityGenerations(limit);
+
+    // The Next.js data cache serializes Date values between cache hits.
+    return rows.map((row) => ({
+      ...row,
+      createdAt: new Date(row.createdAt),
+    }));
+  } catch {
+    console.error("The community generation read failed.");
+    return [];
+  }
+}
+
+export async function setGenerationVisibilityForOwner(
+  id: string,
+  userId: string,
+  visibility: GenerationVisibility,
+) {
+  const [row] = await getDb()
+    .update(generations)
+    .set({ visibility })
+    .where(
+      and(
+        eq(generations.id, id),
+        eq(generations.userId, userId),
+        isNull(generations.deletedAt),
+      ),
+    )
+    .returning({ id: generations.id, visibility: generations.visibility });
+
+  return row;
 }
 
 /**
@@ -225,7 +338,7 @@ export async function listLibraryPage({
  * The undo layer. The owner is filtered inside the statement, so a wrong id
  * matches nothing rather than returning a row to a check that was forgotten
  * (AGENTS.md 9 rule 1). The `deleted_at is null` guard makes a double submit a
- * no-op instead of a second timestamp, and `is_public` comes back because it
+ * no-op instead of a second timestamp, and visibility comes back because it
  * is what tells the action whether the landing gallery has to be expired.
  */
 export async function softDeleteGenerationForOwner(id: string, userId: string) {
@@ -239,7 +352,7 @@ export async function softDeleteGenerationForOwner(id: string, userId: string) {
         isNull(generations.deletedAt),
       ),
     )
-    .returning({ id: generations.id, isPublic: generations.isPublic });
+    .returning({ id: generations.id, visibility: generations.visibility });
 
   return row;
 }
@@ -256,7 +369,7 @@ export async function restoreGenerationForOwner(id: string, userId: string) {
         isNotNull(generations.deletedAt),
       ),
     )
-    .returning({ id: generations.id, isPublic: generations.isPublic });
+    .returning({ id: generations.id, visibility: generations.visibility });
 
   return row;
 }

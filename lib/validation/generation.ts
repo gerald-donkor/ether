@@ -6,6 +6,7 @@ import {
   getModel,
   getModelSize,
 } from "@/lib/ai/catalog";
+import type { GenerationVisibility } from "@/lib/generations/visibility";
 
 /**
  * The shape of one generate request. This module is deliberately not
@@ -37,7 +38,9 @@ export const generationRequestSchema = z
     publish: z
       .literal("public", "Choose whether to publish before generating.")
       .nullish()
-      .transform((value) => value === "public"),
+      .transform<GenerationVisibility>((value) =>
+        value === "public" ? "public" : "private",
+      ),
   })
   // The model and the size are only ever valid as a pair: each model declares
   // its own sizes, and the default model takes no dimensions at all. The

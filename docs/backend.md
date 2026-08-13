@@ -22,8 +22,8 @@ Clerk owns identity. Ether does not duplicate users in Postgres.
 
 ## Data model
 
-Drizzle owns the schema in `lib/db/schema.ts`. The committed migration is
-`drizzle/0000_mean_random.sql`.
+Drizzle owns the schema in `lib/db/schema.ts`. Committed migrations live under
+`drizzle/` and the current schema includes prompt 018's visibility migration.
 
 ### `generations`
 
@@ -36,7 +36,7 @@ Drizzle owns the schema in `lib/db/schema.ts`. The committed migration is
 | `model` | `text` | Not null, the provider's model id. Holds `@cf/black-forest-labs/flux-1-schnell` from 2026-08-13; no migration was needed for the change |
 | `width` | `integer` | Not null, decoded from the returned image |
 | `height` | `integer` | Not null, decoded from the returned image |
-| `is_public` | `boolean` | Not null, defaults to `false`. The owner's publication choice |
+| `visibility` | `generation_visibility` enum | Not null, defaults to `private`. Closed values: `private`, `unlisted`, `public` |
 | `created_at` | `timestamp with time zone` | Not null, defaults to `now()` |
 | `deleted_at` | `timestamp with time zone` | Nullable. The timestamp of a library removal. `NULL` means live. |
 
@@ -45,7 +45,7 @@ Indexes:
 - `generations_pkey` on `id`.
 - `generations_user_id_idx` on `user_id`.
 - `generations_user_created_at_idx` on `user_id, created_at desc`.
-- `generations_public_created_at_idx` on `is_public, created_at desc`.
+- `generations_visibility_created_at_idx` on `visibility, created_at desc`.
 
 The first migration was applied on 2026-08-12. A read-only query against
 `pg_indexes` confirmed the table and its first three indexes.
@@ -77,11 +77,20 @@ mechanism. Existing rows remain live without a backfill, and no index was
 added: owner listings still enter through `generations_user_created_at_idx` on
 `(user_id, created_at desc)`, then filter the narrowed rows by `deleted_at`.
 
-**`is_public` is a boolean, and step 8 will have to migrate it.** `AGENTS.md`
-§9 rule 3 foresees `private | unlisted | public` arriving with sharing and
-prefers an enum for exactly this reason. Prompt 013 specified a boolean and was
-approved as written, so the cost is deliberate and recorded here rather than
-discovered later.
+Prompt 018 replaced that boolean with `generation_visibility` in
+`drizzle/0003_spotty_sinister_six.sql`. The migration creates the enum and a
+private-defaulted column, maps `is_public = true` to `public`, drops the old
+column and index, then creates `generations_visibility_created_at_idx`.
+Existing false rows remain private. The production result was 7 private rows,
+0 unlisted rows and 1 public row, preserving all 8 records.
+
+The database predated Drizzle's migration journal because migrations 0000
+through 0002 had been applied with schema push. Consequently the CLI migration
+wrapper could not safely infer history. Prompt 018 applied migration 0003 with
+Drizzle's official transactional Neon migrator against a baseline folder
+containing only 0003, which both established migration history and applied the
+pending SQL. Read-only checks then confirmed the enum values, private default,
+`NOT NULL`, new index, and complete removal of `is_public`.
 
 ## Database boundary
 
@@ -96,21 +105,23 @@ Available queries:
 - count all generations for one owner;
 - count one owner's generations since a supplied timestamp;
 - insert one generation and return the stored row;
-- list the newest public generations for the landing gallery;
+- list the newest public generations for the landing gallery and Community;
 - read one generation by id **and** owner;
-- delete one generation by id **and** owner, returning the id it removed.
+- read the consent-safe anonymous projection for one shareable generation;
+- update one live generation's visibility by id **and** owner;
+- delete one generation by id **and** owner, returning its id.
 
 ### The public gallery read
 
 `listPublicGenerations(limit)` is the only query in the codebase that does not
-filter on an owner, because it filters on `is_public = true` instead. Its
+filter on an owner, because it filters on `visibility = 'public'` instead. Its
 projection is the privacy boundary: it selects `id`, `image_url`, `width`, and
 `height`, and never `user_id`, `prompt`, or `model`. It orders by `created_at
 desc` and takes the `limit` the caller passes, which is the gallery's
 photographic slot count counted off the component's own column data.
 
 Cache Components is not enabled, so the documented primitive for a non-`fetch`
-read applies: `unstable_cache` with the tag `public-gallery` and no
+read applies: `unstable_cache` with the tag `public-generations` and no
 `revalidate`. There is no polling interval because the strip only changes when
 someone publishes, and the generation action expires the tag when they do.
 
@@ -122,14 +133,10 @@ back to its artboard images rather than throwing or rendering an empty strip.
 The log line is the fixed string `The public gallery read failed.` and carries
 no row, prompt, or owner.
 
-**Known gap, and it is real.** Blob pathnames are
-`generations/<clerk-user-id>/<uuid>.<ext>`, so a published image's URL contains
-its owner's Clerk id, and anonymous visitors to `/` receive it. The query does
-not select `user_id`, but the URL carries it anyway, which means public images
-are correlatable by owner. Nothing else about the owner is exposed, and the
-existing private URLs are unchanged. Fixing it means a second storage pathname
-scheme, which prompt 013 placed out of scope. Resolve it in step 8, where
-sharing makes the URL a first-class product surface.
+Prompt 018 resolved the pathname privacy gap. Every stored URL now uses
+`generations/<generation-uuid>.<ext>`, including all 8 pre-existing objects.
+The migration moved 8 objects on its first pass, skipped all 8 on its
+idempotence pass, and left 0 noncanonical URLs and 0 owner ids in URLs.
 
 ## Generation action
 
@@ -144,10 +151,10 @@ The action:
    images requested**;
 4. calls Cloudflare Workers AI, once per requested image, sequentially;
 5. writes each returned image's bytes to public Blob storage;
-6. writes each generation row, including the validated publication boolean;
+6. writes each generation row, including the validated visibility;
 7. revalidates `/generate` once, when at least one row was written;
-8. expires the `public-gallery` tag and revalidates `/` once, but only when at
-   least one row that was written is public;
+8. expires the `public-generations` tag and revalidates `/` and `/community`
+   once, but only when at least one row that was written is public;
 9. returns a discriminated result carrying every generation that succeeded and
    a count of the ones that did not.
 
@@ -219,8 +226,8 @@ succeeds but the database insert fails, the action attempts to delete the Blob.
 
 `/g/[id]` is one generation's record: the image at its own stored ratio, then
 prompt, model, size, created date and visibility, then a download link and a
-delete control. It is owner-only. Sharing, a publish toggle, and a public view
-of this route are all build step 8.
+delete control. Prompt 016 shipped it owner-only; prompt 018's sharing section
+below supersedes that access rule and layout ownership.
 
 `app/(app)/g/[id]/page.tsx` awaits `params` (a Promise in Next 16), reads the
 session through `requireUserId()` rather than trusting the proxy, parses the
@@ -289,11 +296,12 @@ inside one that would swallow it as a failure.
 
 **Logging.** Every `console.error` on this path is a fixed string plus an
 error name and message with the row's prompt **and its Blob url** replaced. The
-url is redacted as well as the prompt because Blob pathnames carry the owner's
-Clerk id, which is the known gap recorded under the public gallery read.
+url remains sensitive user data even though prompt 018 removed owner ids from
+canonical pathnames.
 
-`proxy.ts` gains `/g` in both the route matcher and `config.matcher`, so no
-static marketing route starts paying for auth per request. `/generate`'s
+Prompt 016 added `/g` to both proxy matchers. Prompt 018 removed it from the
+protected matcher while retaining it in `config.matcher`, because optional
+`auth()` still needs Clerk middleware context. `/generate`'s
 history cards become links to `/g/<id>`; the card's markup gains a `Link`
 wrapper and a hover colour transition on the caption, and nothing else changes.
 
@@ -318,7 +326,7 @@ is `countRecentGenerationsForUser`: it counts removed rows too because it is a
 spending floor, not an inventory count. `listLibraryPage` filters on owner and
 the selected lifecycle state, escapes `\\`, `%`, and `_` before an `ilike`
 search, orders newest first, and reads one extra row to determine whether an
-older page exists without a second count. The public-gallery cache tag is
+older page exists without a second count. The `public-generations` cache tag is
 expired only when a changed row was public.
 
 `removeGeneration` and `restoreGeneration` are Server Actions in
@@ -335,6 +343,47 @@ from the Removed view. Its optional `returnTo` field is accepted only as
 `/generate` or `/library`, with `/generate` as the fallback; it cannot become
 an open redirect. It now revalidates `/library` as well as the existing
 surfaces.
+
+## Sharing and the community showcase (prompt 018)
+
+Visibility is one client-safe closed definition in
+`lib/generations/visibility.ts`: `private | unlisted | public`. The schema,
+validation, actions, library labels and generation result state import it
+rather than redeclaring competing unions. The state contract is:
+
+| Visibility | Owner | Exact-link visitor | Landing and Community |
+| --- | --- | --- | --- |
+| `private` | Full record and controls | 404 | Absent |
+| `unlisted` | Full record and controls | Redacted image record | Absent |
+| `public` | Full record and controls | Redacted image record | Present |
+
+`/g/[id]` now lives in `app/(generation)/` under a compact public shell. It
+parses the route id, optionally reads Clerk identity, and tries the existing
+owner-filtered live query first. A visitor who is not the owner can only reach
+`getShareableGeneration`, whose projection contains `id`, image URL, model,
+dimensions, visibility and creation time. It does not select the prompt or
+owner id. Private, removed, malformed and missing ids all resolve to 404.
+
+The owner-only client leaf submits exactly `generationId` and `visibility` to
+`changeGenerationVisibility`. The Server Action authenticates, validates the
+closed enum, performs one owner-filtered live-row update, returns the same
+not-found result for a foreign id, expires `public-generations`, and
+revalidates `/`, `/community`, `/generate`, `/library`, and the exact record.
+Shareable states expose both an ordinary `/g/<id>` anchor and a progressively
+enhanced clipboard control with a mounted status announcement. The prompt is
+never copied or rendered anonymously.
+
+`/community` is an async Server Component backed by a cached, bounded query for
+the newest 12 live public rows. The projection contains only id, image URL,
+dimensions and creation time. The page renders an asymmetric proof sheet with
+uncropped intrinsic-ratio images, or a factual Generate empty state. Cache-hit
+dates are normalized back to `Date` objects at the query boundary because the
+Next.js data cache serializes them.
+
+The same `public-generations` tag owns the landing and Community public reads.
+Generate, visibility changes, remove, restore and permanent delete also
+revalidate `/community` whenever a public row may have changed. There is no
+polling interval and no model or Blob call on a visibility change.
 
 ## AI model
 
@@ -538,15 +587,18 @@ measured rather than assumed.
 ## Storage
 
 Generated images are written to
-`generations/<clerk-user-id>/<random-uuid>.<extension>` with public access and
-without an added random suffix. The UUID makes each pathname unique. Generated
-images remain user data in Blob and never enter `public/` or Git.
+`generations/<generation-uuid>.<extension>` with public access and without an
+added random suffix. The database id is allocated before the model call and is
+reused for both the row and Blob pathname. No owner identifier enters a new
+pathname. Generated images remain user data in Blob and never enter `public/`
+or Git.
 
 ## Auth and routes
 
-`proxy.ts` optimistically protects `/generate`, `/account` and `/g`. The app layout,
-each protected page, and the generation action independently read the server
-session. Proxy is not the authorization boundary.
+`proxy.ts` optimistically protects `/generate`, `/account` and `/library`.
+`/g/[id]` still passes through Clerk middleware for optional identity, but it
+is not route-wide protected. Each protected page and every mutation
+independently read the server session. Proxy is not the authorization boundary.
 
 | Route | Render and data behavior |
 | --- | --- |
@@ -555,7 +607,8 @@ session. Proxy is not the authorization boundary.
 | `/sign-up` | Public Clerk sign-up screen |
 | `/generate` | Dynamic, owner-scoped history read and Server Action mutation |
 | `/account` | Dynamic Clerk identity read and owner-scoped generation count |
-| `/g/[id]` | Dynamic, owner-scoped single-row read and a delete Server Action. Never prerendered |
+| `/g/[id]` | Dynamic. Owner gets the full live row and controls; exact-link visitors get only the consent-safe projection for unlisted or public rows |
+| `/community` | Public cached proof sheet of newest live public rows, with a factual empty state on read failure |
 
 Clerk 7 uses `Show when="signed-in"` and `Show when="signed-out"` for auth-state
 rendering. These replace the `SignedIn` and `SignedOut` names in the older
@@ -594,15 +647,16 @@ Vercel environment.
 ## User data
 
 Ether stores the Clerk owner id, prompt, generated image URL, model id, decoded
-dimensions, the publication choice, and creation time. It reads the user's
+dimensions, the visibility choice, and creation time. It reads the user's
 email and join date from Clerk for `/account` but does not store them locally.
 Prompts, emails, request bodies, publication payloads, provider credentials,
 and Blob tokens are not logged.
 
-A generation is private unless its owner opted in when creating it. Publishing
-transmits the image URL and its stored dimensions to anonymous visitors, and
-nothing else the query selects. See the known gap under the public gallery read
-for what the URL itself still carries.
+A generation is private unless its owner changes or creates it as public.
+Unlisted and public exact-link reads transmit the image URL, model, dimensions,
+visibility and creation time, but never the prompt or owner. Only public rows
+reach `/` and `/community`. Canonical Blob URLs no longer contain the Clerk
+owner id.
 
 ## Verification, prompt 017
 
@@ -938,3 +992,86 @@ Not verified, and why:
   and the additive-only stylesheet are a stronger guarantee than a screenshot,
   and `components/motion/ColumnDrift.tsx` was not modified, so the reduced
   motion path and both marquee axes are unchanged by construction.
+
+## Verification, prompt 018
+
+Run on 2026-08-13.
+
+- `npm run lint` exited 0 with no ESLint findings. `next typegen` printed
+  `Types generated successfully`, and `node_modules/.bin/tsc --noEmit` exited
+  0. `git diff --check` also exited 0.
+- The reviewed enum migration preserved all 8 rows: 7 private, 0 unlisted and
+  1 public. Read-only checks returned enum labels `private`, `unlisted`,
+  `public`; a non-null `generation_visibility` column with default `private`;
+  `generations_visibility_created_at_idx`; and zero `is_public` columns.
+- `dotenv -e .env.local -- drizzle-kit migrate` could not apply safely because
+  the live schema had been established by earlier `push` commands and had no
+  migration journal. Drizzle's official transactional Neon migrator was run
+  against a temporary baseline containing only reviewed migration 0003. It
+  applied the SQL and established the journal without replaying 0000 through
+  0002 against an existing table.
+- The Blob pathname migration returned
+  `{ scanned: 8, moved: 8, skipped: 0, failed: 0 }`. Its rerun returned
+  `{ scanned: 8, moved: 0, skipped: 8, failed: 0 }`. Aggregate verification
+  returned 8 total, 0 noncanonical paths and 0 owner ids in URLs. Each move
+  checked the new object and the absence of the old object without printing a
+  URL.
+- The isolated cross-owner check returned true for owner read, cross-owner
+  block, private/unlisted/public/removed anonymous projections, projection
+  redaction, wrong-owner update block, all visibility transitions, Community's
+  exact limit and newest-first ordering, public-only filtering, and cleanup.
+  Synthetic rows and their temporary Blob were removed in `finally`.
+- Anonymous route checks returned 404 for private, 200 for unlisted, and 200
+  for public. Anonymous HTML contained neither synthetic prompt nor owner id.
+  Unlisted was absent from `/community` and `/`; public appeared in both and
+  Community linked to its exact record. All synthetic route-check data was
+  removed afterwards.
+- The first cached Community browser read exposed a serialized-date bug. The
+  query boundary now converts cached creation values back to `Date`; repeated
+  `/community` requests returned 200 after the fix.
+- Fresh screenshots at 390 x 844, 768 x 1024 and 1440 x 1200 confirmed a
+  single mobile column, no horizontal overflow, uncropped intrinsic-ratio
+  imagery, and the intended asymmetric desktop proof sheet. No new motion was
+  added. The existing public-image LCP warning was observed and intentionally
+  does not add priority, because the project contract reserves priority for the
+  macaw.
+- The required `npm run build` remains blocked in this host by a Turbopack
+  internal error while processing `app/globals.css`: `creating new process`,
+  `binding to a port`, `Operation not permitted (os error 1)`. The same failure
+  occurred with `.env.local` present and absent, and the file was restored.
+- Next's documented `npm run build -- --webpack` fallback compiled, completed
+  TypeScript, generated 18 pages, and produced the same route table as clean
+  commit `ed8e75b`: `/` and `/community` static, `/g/[id]`, `/generate`,
+  `/library` and `/account` dynamic, with every unrelated route unchanged.
+  The fallback also passed from a clean `.next` directory with `.env.local`
+  absent, logged the two fixed public-read failures, rendered the empty
+  Community state, and restored `.env.local`.
+- The clean environment-absent landing comparison was made against a detached
+  worktree at `ed8e75b`. After raw-diff inspection and removal of executable
+  build wiring, both complete server-rendered documents were exactly 55,962
+  bytes and `diff` exited 0. The initial attempt was discarded because a prior
+  Next data-cache entry had supplied the real public row despite the absent
+  environment.
+- Client output had zero name hits and zero value hits for `DATABASE_URL`,
+  `DATABASE_URL_UNPOOLED`, `BLOB_READ_WRITE_TOKEN`, `CLERK_SECRET_KEY`,
+  `CLOUDFLARE_ACCOUNT_ID`, and `CLOUDFLARE_API_TOKEN`.
+- The copy audit found no visible em-dash, exclamation mark, invented number,
+  hype, or moderation, curation, or creator-identification claim.
+
+Not run, and why:
+
+- **Authenticated owner and signed-in non-owner browser passes.** No reusable
+  Clerk browser session was available. Their database boundaries were covered
+  by the isolated two-owner checks, and the owner/non-owner JSX branches were
+  inspected, but those are not claimed as signed-in browser tests.
+- **Clipboard success/failure and full keyboard traversal.** These controls are
+  owner-only, so the same missing authenticated browser session prevented an
+  interaction pass. The committed leaf retains an ordinary anchor when the
+  Clipboard API is absent, uses native controls, and has a mounted focusable
+  status region, but runtime interaction is not claimed.
+- **A live visibility mutation through Clerk.** The owner-filtered query and
+  every transition ran against isolated synthetic rows. The authenticated
+  Server Action itself was not submitted from a signed-in browser.
+- **Landing motion in a browser.** No settled landing component or motion file
+  changed, and the environment-absent server-rendered document is identical,
+  but motion playback was not re-recorded in this prompt.

@@ -111,11 +111,27 @@ markup is identical. Check the byte counts with `wc -c` first: an unchanged
 length is a good early signal, and a changed one means look at the raw diff
 before normalising anything.
 
+When comparing different commits through the documented `--webpack` fallback,
+the flight payload can also contain build-specific module ids and chunk lists.
+Do not keep widening a regex until that diff disappears. First inspect the raw
+diff for an actual page-data change, then compare the server-rendered document
+with scripts removed:
+
+```bash
+perl -0pe 's#<script\b.*?</script>##gs; s#<link rel="preload" as="script"[^>]*>##g; s#<link rel="stylesheet" href="[^"]+"#<link rel="stylesheet" href="STYLE"#g; s#__variable_[A-Za-z0-9_]+#FONT#g' \
+  /tmp/index-before.html > /tmp/visible-before.html
+perl -0pe 's#<script\b.*?</script>##gs; s#<link rel="preload" as="script"[^>]*>##g; s#<link rel="stylesheet" href="[^"]+"#<link rel="stylesheet" href="STYLE"#g; s#__variable_[A-Za-z0-9_]+#FONT#g' \
+  /tmp/index-after.html > /tmp/visible-after.html
+diff /tmp/visible-before.html /tmp/visible-after.html && echo IDENTICAL
+```
+
+This fallback compares the complete server-rendered document and removes only
+executable build wiring. It is not a substitute for the raw-diff inspection.
+
 A visual pass is still worth doing for motion, which markup identity says
-nothing about. Note that `resize_window` in the browser tools did **not** reflow
-this page's viewport when it was tried on 2026-08-13, so a per-breakpoint
-screenshot comparison is not currently a solved step and should not be claimed
-as one.
+nothing about. `resize_window` in the browser tools did **not** reflow this
+page's viewport when it was tried on 2026-08-13. Capture a fresh page at each
+breakpoint instead of resizing one browser page and assuming it changed.
 
 ## Check a secret never reached the browser
 
@@ -143,3 +159,31 @@ than the name, which must return zero:
 val=$(grep '^CLERK_SECRET_KEY=' .env.local | cut -d= -f2- | tr -d '"'"'"'')
 grep -rl "$val" .next/static/ 2>/dev/null | wc -l
 ```
+
+## Exercise an owner boundary without logging user data
+
+This procedure was worked out for the library and repeated for sharing. Use it
+for a query or mutation whose decisive property is that one owner cannot read
+or change another owner's row.
+
+1. Create a temporary TypeScript module in `/tmp`, never in the repository.
+2. Load `.env.local` with the committed `dotenv` wrapper and import only the
+   query-layer functions under test.
+3. Insert synthetic rows for two synthetic owner ids. Use a temporary Blob only
+   if the projection or cleanup path needs a real URL.
+4. Exercise the owner read or mutation with both ids. For sharing, cover every
+   visibility plus a removed row, prove the anonymous projection omits prompt
+   and owner, and prove only live public rows reach Community.
+5. Print booleans and aggregate counts only. Never print owner ids, prompts,
+   row ids, Blob URLs, or search values.
+6. Clean up every synthetic row and temporary Blob in `finally`, then run an
+   aggregate query proving no synthetic rows remain.
+
+Run the module with the existing environment discipline:
+
+```bash
+node_modules/.bin/dotenv -e .env.local -- node_modules/.bin/tsx /tmp/<check>.ts
+```
+
+The test is not complete merely because its assertions passed. Cleanup is part
+of the check, and a failed cleanup is reported as a failure.

@@ -1,12 +1,18 @@
 import {
-  boolean,
   index,
   integer,
+  pgEnum,
   pgTable,
   text,
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
+import { GENERATION_VISIBILITIES } from "@/lib/generations/visibility";
+
+export const generationVisibility = pgEnum(
+  "generation_visibility",
+  GENERATION_VISIBILITIES,
+);
 
 export const generations = pgTable(
   "generations",
@@ -18,9 +24,9 @@ export const generations = pgTable(
     model: text("model").notNull(),
     width: integer("width").notNull(),
     height: integer("height").notNull(),
-    // Private unless the owner opts in on the generate form. The default is
-    // what keeps every row written before this column existed private.
-    isPublic: boolean("is_public").notNull().default(false),
+    visibility: generationVisibility("visibility")
+      .notNull()
+      .default("private"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -28,7 +34,7 @@ export const generations = pgTable(
     // leaves every listing while its Blob object stays fetchable, which is
     // exactly what makes restore possible and exactly why permanent deletion
     // is a separate operation that removes both. See docs/backend.md.
-    // NULL means live, so every row written before this column existed is.
+    // NULL means live, so every row written before this column existed is live.
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (table) => [
@@ -37,9 +43,9 @@ export const generations = pgTable(
       table.userId,
       table.createdAt.desc(),
     ),
-    // The landing gallery's only read: public rows, newest first.
-    index("generations_public_created_at_idx").on(
-      table.isPublic,
+    // Public surfaces enter through visibility, newest first.
+    index("generations_visibility_created_at_idx").on(
+      table.visibility,
       table.createdAt.desc(),
     ),
   ],

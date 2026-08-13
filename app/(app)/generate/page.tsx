@@ -18,7 +18,7 @@ export default async function GeneratePage() {
           imageUrl: generation.imageUrl,
           width: generation.width,
           height: generation.height,
-          isPublic: generation.isPublic,
+          visibility: generation.visibility,
           createdAt: generation.createdAt.toISOString(),
         }))}
       />

@@ -6,7 +6,8 @@ import { redirect } from "next/navigation";
 import {
   deleteGenerationForOwner,
   getGenerationForOwnerIncludingRemoved,
-  PUBLIC_GALLERY_TAG,
+  PUBLIC_GENERATIONS_TAG,
+  setGenerationVisibilityForOwner,
 } from "@/lib/db/queries";
 import { deleteGenerationImage } from "@/lib/storage/generations";
 import {
@@ -14,6 +15,11 @@ import {
   generationIdSchema,
   RETURN_TO_FIELD,
 } from "@/lib/validation/generation";
+import {
+  generationVisibilitySchema,
+  VISIBILITY_FIELD,
+} from "@/lib/validation/visibility";
+import type { GenerationVisibility } from "@/lib/generations/visibility";
 
 /**
  * Deletion is permanent here: the Blob object and the row both go. A row
@@ -24,6 +30,11 @@ import {
 export type DeleteGenerationState =
   | { ok: null; error: null }
   | { ok: false; error: string };
+
+export type VisibilityActionState =
+  | { ok: null; error: null; visibility: null }
+  | { ok: false; error: string; visibility: null }
+  | { ok: true; error: null; visibility: GenerationVisibility };
 
 /**
  * One message for "no such image" and for "not yours". A distinct refusal
@@ -46,9 +57,8 @@ function returnPath(value: FormDataEntryValue | null) {
 }
 
 /**
- * A provider or database message can quote the row it failed on, and a blob
- * url carries the owner's Clerk id in its pathname, so both are removed before
- * anything is logged.
+ * A provider or database message can quote the row it failed on. Prompts and
+ * Blob urls are user data, so both are removed before anything is logged.
  */
 function safeErrorMessage(error: unknown, redact: string[]) {
   if (!(error instanceof Error)) return "Unknown error";
@@ -134,9 +144,10 @@ export async function deleteGeneration(
   // anyone else can see, so only a public one expires the landing gallery.
   revalidatePath("/generate");
   revalidatePath("/library");
-  if (row.isPublic) {
-    updateTag(PUBLIC_GALLERY_TAG);
+  if (row.visibility === "public") {
+    updateTag(PUBLIC_GENERATIONS_TAG);
     revalidatePath("/");
+    revalidatePath("/community");
   }
 
   // The page's whole subject no longer exists, so there is no slot to render a
@@ -146,4 +157,58 @@ export async function deleteGeneration(
   // `redirect` signals by throwing, so it sits outside every try above rather
   // than inside one that would swallow it as a failure.
   redirect(destination);
+}
+
+export async function changeGenerationVisibility(
+  _previousState: VisibilityActionState,
+  formData: FormData,
+): Promise<VisibilityActionState> {
+  const { userId } = await auth();
+  if (!userId) {
+    return { ok: false, error: "Sign in to change visibility.", visibility: null };
+  }
+
+  const parsed = generationVisibilitySchema.safeParse({
+    generationId: formData.get(GENERATION_ID_FIELD),
+    visibility: formData.get(VISIBILITY_FIELD),
+  });
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? NOT_FOUND,
+      visibility: null,
+    };
+  }
+
+  let row;
+  try {
+    row = await setGenerationVisibilityForOwner(
+      parsed.data.generationId,
+      userId,
+      parsed.data.visibility,
+    );
+  } catch (error) {
+    console.error(
+      "Generation visibility update failed.",
+      error instanceof Error ? error.name : "Unknown error",
+    );
+    return {
+      ok: false,
+      error: "Visibility could not be saved. Try again.",
+      visibility: null,
+    };
+  }
+
+  if (!row) {
+    return { ok: false, error: NOT_FOUND, visibility: null };
+  }
+
+  updateTag(PUBLIC_GENERATIONS_TAG);
+  revalidatePath("/");
+  revalidatePath("/community");
+  revalidatePath("/generate");
+  revalidatePath("/library");
+  revalidatePath(`/g/${row.id}`);
+
+  return { ok: true, error: null, visibility: row.visibility };
 }

@@ -5,7 +5,7 @@ import { useFormStatus } from "react-dom";
 import {
   deleteGeneration,
   type DeleteGenerationState,
-} from "@/app/(app)/g/[id]/actions";
+} from "@/app/(generation)/g/[id]/actions";
 import {
   removeGeneration,
   restoreGeneration,

@@ -785,8 +785,8 @@ migrations themselves go in `docs/backend.md`**, not here.
 - **`generation`** — one image. The Clerk `userId`, the prompt exactly as the
   user typed it, the Blob url, the model id that produced it, the dimensions,
   and `createdAt`. Indexed on `(userId, createdAt desc)`, because the only read
-  is "this user's, newest first". Introduced by step 1; gains a `public` flag at
-  step 4 and a soft-delete state at step 7.
+  is "this user's, newest first". Introduced by step 1; its visibility is the
+  `private | unlisted | public` enum, and it gains a soft-delete state at step 7.
 - **No `users` table.** Clerk owns identity (§7.5).
 - **`collection`** *(step 7, if the library needs it)* — a named grouping of a
   user's generations. Do not create it before the step that uses it.

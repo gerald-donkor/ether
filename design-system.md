@@ -241,20 +241,20 @@ has a separate reading family: an offset field guide, a horizontal prompt
 assembly bench, a sparse capability ledger, and a one-screen editorial
 threshold page.
 
-`/community` is the bridge to the landing gallery rather than a second gallery.
-Its layout family, artboard photograph, tokens, and spacing are unchanged; its
-copy states the actual boundary, which is that a generation is private until
-its owner opts one image into the public strip, and its single action links to
-`/#gallery-title`. It queries nothing, shows no prompt, and claims no
-moderation, curation, profile, or permanence. The real community showcase is
-build step 8.
+`/community` is now the real public showcase. It is a staggered proof sheet,
+not a second landing gallery, card grid, marquee, or image-and-text split. One
+12-column desktop sequence alternates wide and narrow uncropped generations
+with deliberate empty space; below `md` it becomes one strict column. The
+query is bounded to the newest 12 live public rows, and the layout sequence is
+written once at module scope. Those numbers are implementation limits, never
+visible statistics.
 
-All route photography is reused from `public/assets/ui/img/` as an artboard
-visual reference. It is not described as an Ether generation, a product
-screenshot, or community work. Images reserve their intrinsic ratio through
-`next/image`, set responsive `sizes`, and do not use priority. The pages read no
-request state, provider, secret, or user data and add no motion beyond the
-existing link hover and button active feedback.
+Each image keeps its stored intrinsic ratio, uses `--r-card`, supplies
+responsive `sizes`, links to `/g/<id>`, and is never priority. The only caption
+is its real creation date. Prompt and owner are absent from the projection and
+the generic alt text claims no subject. The empty state states only that no
+public work is available and links to Generate. The page adds no motion beyond
+existing link and button feedback.
 
 ### 2.10 Footer destination routes
 
@@ -285,8 +285,8 @@ the image leads, and everything else is the record beneath it. It is
 deliberately not `/generate`'s form-led column, not a grid, and not another
 image-plus-text split (§6.5).
 
-The column is capped at 880px inside `--container`. A small `Back to your
-images` link sits above a heading at the `clamp(28px,5vw,40px)` role the
+The column is capped at 880px inside `--container`. An owner gets a small `Back
+to your images` link above a heading at the `clamp(28px,5vw,40px)` role the
 history section already uses, so this page's type is one step quieter than
 `/generate`'s. **The image panel takes the row's own stored width and height as
 its `aspectRatio`**, so the box is the correct shape before the image loads,
@@ -299,6 +299,19 @@ values `--text` at 15px on 26px leading. **One hairline above the list rather
 than one under every row** - the list is five items, and a rule per row would
 read as a spec table. Sizes and dates are real query results; the model line
 falls back to the stored id when the registry does not list it.
+
+Owners retain that complete record and gain one native visibility selector for
+Private, Unlisted and Public. Its explanatory copy names the exact audience,
+and a lime Save is an action rather than a status badge. Unlisted and Public
+also expose the ordinary canonical link and a copy enhancement. Clipboard
+feedback uses a mounted status region and never relies on colour.
+
+Visitors who are not the owner see a deliberately reduced record for Unlisted
+or Public: image, model, size, date, visibility and download. They never see a
+prompt, owner field, back-to-library link, visibility control or delete
+control. Private and removed records are 404. The route uses its own compact
+public shell so shareability is a row decision rather than an authenticated
+layout decision.
 
 A second hairline separates the action row: `Download` and `Delete`, both the
 existing ghost pill. **The destructive control does not become a new colour.**

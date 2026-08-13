@@ -22,6 +22,13 @@
       "when": 1786642922732,
       "tag": "0002_natural_skin",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786645394158,
+      "tag": "0003_spotty_sinister_six",
+      "breakpoints": true
     }
   ]
 }

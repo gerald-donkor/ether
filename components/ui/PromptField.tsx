@@ -97,8 +97,8 @@ export function PromptField({
             htmlFor={`${id}-publish`}
             className="text-text-2 max-w-[62ch] text-[13px] leading-[20px]"
           >
-            Show this image in the public gallery on the home page. Your prompt
-            stays private.
+            Show this image on the home page and in Community. Your prompt stays
+            private.
           </label>
         </div>
       ) : null}

@@ -3,10 +3,11 @@
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath, updateTag } from "next/cache";
 import {
-  PUBLIC_GALLERY_TAG,
+  PUBLIC_GENERATIONS_TAG,
   restoreGenerationForOwner,
   softDeleteGenerationForOwner,
 } from "@/lib/db/queries";
+import type { GenerationVisibility } from "@/lib/generations/visibility";
 import {
   GENERATION_ID_FIELD,
   generationIdSchema,
@@ -17,7 +18,8 @@ import {
  * stamps `deleted_at`, which takes the row out of every listing, the
  * permalink, the public gallery and the account count while its Blob object
  * stays where it is. Permanent deletion is the separate operation in
- * `app/(app)/g/[id]/actions.ts`, and it removes both. See docs/backend.md.
+ * `app/(generation)/g/[id]/actions.ts`, and it removes both. See
+ * docs/backend.md.
  */
 export type LibraryActionState =
   | { ok: null; error: null }
@@ -47,7 +49,7 @@ async function mutate(
   run: (
     id: string,
     userId: string,
-  ) => Promise<{ id: string; isPublic: boolean } | undefined>,
+  ) => Promise<{ id: string; visibility: GenerationVisibility } | undefined>,
   failure: string,
 ): Promise<LibraryActionState> {
   // a. The session, read on the server every time. The form carries only the
@@ -88,9 +90,10 @@ async function mutate(
   // rule `deleteGeneration` already follows.
   revalidatePath("/library");
   revalidatePath("/generate");
-  if (row.isPublic) {
-    updateTag(PUBLIC_GALLERY_TAG);
+  if (row.visibility === "public") {
+    updateTag(PUBLIC_GENERATIONS_TAG);
     revalidatePath("/");
+    revalidatePath("/community");
   }
 
   // No redirect. The row's surface still exists and the user stays where they

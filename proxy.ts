@@ -4,7 +4,6 @@ const isProtectedRoute = createRouteMatcher([
   "/generate(.*)",
   "/account(.*)",
   "/library(.*)",
-  "/g(.*)",
 ]);
 
 export default clerkMiddleware(async (auth, request) => {
@@ -18,6 +17,8 @@ export const config = {
     "/generate/:path*",
     "/account/:path*",
     "/library/:path*",
+    // Clerk's optional auth() on a public generation still needs middleware
+    // context. This matcher runs Clerk without adding /g to isProtectedRoute.
     "/g/:path*",
   ],
 };

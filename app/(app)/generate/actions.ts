@@ -9,8 +9,9 @@ import {
 import {
   countRecentGenerationsForUser,
   createGeneration,
-  PUBLIC_GALLERY_TAG,
+  PUBLIC_GENERATIONS_TAG,
 } from "@/lib/db/queries";
+import type { GenerationVisibility } from "@/lib/generations/visibility";
 import {
   deleteGenerationImage,
   storeGenerationImage,
@@ -33,7 +34,7 @@ export type GenerationResult = {
   imageUrl: string;
   width: number;
   height: number;
-  isPublic: boolean;
+  visibility: GenerationVisibility;
   createdAt: string;
 };
 
@@ -79,7 +80,7 @@ export async function generateGeneration(
   }
 
   const { prompt, model: modelId, size: sizeKey, count } = parsed.data;
-  const isPublic = parsed.data.publish;
+  const visibility = parsed.data.publish;
 
   try {
     // This indexed count is a first-line spending cap, not a distributed rate
@@ -114,6 +115,7 @@ export async function generateGeneration(
   // Sequential, not parallel: per-account concurrency on Workers AI is
   // unverified, and a serial loop keeps a partial failure legible.
   for (let index = 0; index < count; index += 1) {
+    const generationId = crypto.randomUUID();
     let generated: Awaited<ReturnType<typeof generateImageForPrompt>>;
     try {
       generated = await generateImageForPrompt({ prompt, modelId, sizeKey });
@@ -137,7 +139,7 @@ export async function generateGeneration(
     let blob: Awaited<ReturnType<typeof storeGenerationImage>>;
     try {
       blob = await storeGenerationImage({
-        userId,
+        generationId,
         bytes: generated.bytes,
         mediaType: generated.mediaType,
       });
@@ -150,16 +152,17 @@ export async function generateGeneration(
 
     try {
       const row = await createGeneration({
+        id: generationId,
         userId,
         prompt,
         imageUrl: blob.url,
         model: modelId,
         width: generated.width,
         height: generated.height,
-        isPublic,
+        visibility,
       });
 
-      if (row.isPublic) publishedAny = true;
+      if (row.visibility === "public") publishedAny = true;
 
       generations.push({
         id: row.id,
@@ -167,7 +170,7 @@ export async function generateGeneration(
         imageUrl: row.imageUrl,
         width: row.width,
         height: row.height,
-        isPublic: row.isPublic,
+        visibility: row.visibility,
         createdAt: row.createdAt.toISOString(),
       });
     } catch (error) {
@@ -204,8 +207,9 @@ export async function generateGeneration(
   // route is left alone. Only a published one expires the gallery's cached
   // read and the landing page that renders it.
   if (publishedAny) {
-    updateTag(PUBLIC_GALLERY_TAG);
+    updateTag(PUBLIC_GENERATIONS_TAG);
     revalidatePath("/");
+    revalidatePath("/community");
   }
 
   return { ok: true, error: null, generations, failed };

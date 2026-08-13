@@ -37,8 +37,8 @@ function statusMessage(
   if (state.ok !== true) return "Your next image will appear here.";
 
   const made = state.generations.length;
-  const privacy = state.generations[0].isPublic
-    ? "Published to the public gallery."
+  const privacy = state.generations[0].visibility === "public"
+    ? "Published to the home page and Community."
     : made === 1
       ? "It stays private."
       : "They stay private.";

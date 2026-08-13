@@ -3,17 +3,17 @@ import "server-only";
 import { del, getDownloadUrl, put } from "@vercel/blob";
 
 export async function storeGenerationImage({
-  userId,
+  generationId,
   bytes,
   mediaType,
 }: {
-  userId: string;
+  generationId: string;
   bytes: Uint8Array;
   mediaType: string;
 }) {
   const extension = mediaType === "image/jpeg" ? "jpg" : "png";
   return put(
-    `generations/${userId}/${crypto.randomUUID()}.${extension}`,
+    `generations/${generationId}.${extension}`,
     Buffer.from(bytes),
     {
       access: "public",

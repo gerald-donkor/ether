@@ -61,8 +61,7 @@ export default async function LibraryPage({
         </h1>
         <p className="text-text-2 mt-4 max-w-[52ch] text-[15px] leading-[26px]">
           Every image you have generated, newest first. Removing one takes it
-          out of your library and out of the public gallery, and you can put it
-          back.
+          out of your library and every public surface, and you can put it back.
         </p>
 
         <div className="mt-10 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
@@ -156,9 +155,10 @@ export default async function LibraryPage({
                           {row.width} x {row.height}
                         </span>
                         <span>{dateFormat.format(row.createdAt)}</span>
-                        {row.isPublic && view === "active" ? (
-                          <span>Public</span>
-                        ) : null}
+                        <span>
+                          {row.visibility[0].toUpperCase() +
+                            row.visibility.slice(1)}
+                        </span>
                       </p>
                     </div>
 

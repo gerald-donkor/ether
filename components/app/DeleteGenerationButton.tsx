@@ -5,7 +5,7 @@ import { useFormStatus } from "react-dom";
 import {
   deleteGeneration,
   type DeleteGenerationState,
-} from "@/app/(app)/g/[id]/actions";
+} from "@/app/(generation)/g/[id]/actions";
 import { GENERATION_ID_FIELD } from "@/lib/validation/generation";
 
 const INITIAL_STATE: DeleteGenerationState = { ok: null, error: null };
