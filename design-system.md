@@ -189,16 +189,42 @@ has no marketing footer.
 
 `/generate` is a single form-led column. The title and promoted prompt field
 establish the action, followed by a result region and a three-column history
-grid that collapses to two columns and then one. The result reserves a square
-aspect ratio from first paint, so empty, pending, and filled states occupy the
-same space. Generated-image cards use `--r-card`; the result panel uses
-`--r-panel`. The gallery remains the only `--r-none` surface.
+grid that collapses to two columns and then one. Generated-image cards use
+`--r-card`; the result panel uses `--r-panel`. The gallery remains the only
+`--r-none` surface.
 
 The prompt field on this route carries one unchecked publication checkbox below
 the input pill, and the landing page's copy of the same component carries none.
 It is a native control with a real label, so it inherits the global lime focus
 ring; lime appears only as the checked accent, which is consistent with lime
 marking the thing you act on. It adds no motion, no card, and no new token.
+
+**The control row** sits between the input pill and the publication checkbox,
+in the same opt-in slot: `PromptField` renders nothing at all when the slot is
+empty, so the landing page's markup is unchanged and was verified byte for byte
+against a pre-change build. It is three native `<select>` elements, each with a
+real `<label>`, for model, size, and image count, followed by one line of plain
+text describing the selected model.
+
+Its values are the existing ones: `--surface-2` ground, `--r-pill`, 13px labels
+at the `--text-3` role, 13px control text at the `--text` role, and 16px above
+the row on the 4px spacing scale. Being native controls, they inherit the global
+lime `:focus-visible` ring and the page's `color-scheme: dark`, so the option
+popups need no styling of their own. **No new token, no new radius, no new
+colour, and no row added to §3** — the change introduces no motion.
+
+**The result region reserves its slots before the response exists.** It renders
+one slot per requested image at the exact aspect ratio the chosen size implies,
+computed from the size's width and height, so the image arrives into a box that
+was already the right shape. One image fills the column; two or four lay out in
+two columns above `sm` and one below. Once images exist, each slot takes its own
+stored dimensions rather than the control's. The pending overlay covers the
+whole region, as before. This replaces the fixed square reservation, which could
+only ever have been right for one of the four sizes.
+
+The status line is unchanged in mechanism and honest about a partial result: it
+reports how many images were generated, how many failed, and whether they were
+published, through the same `role="status"` node that still takes focus.
 
 ### 2.9 Marketing information routes
 

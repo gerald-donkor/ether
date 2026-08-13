@@ -120,22 +120,51 @@ sharing makes the URL a first-class product surface.
 ## Generation action
 
 `app/(app)/generate/actions.ts` exports `generateGeneration`. Its browser input
-is two `FormData` fields, `prompt` and `publish`. The action:
+is five `FormData` fields: `prompt`, `model`, `size`, `count` and `publish`.
+The action:
 
 1. reads the Clerk session and rejects an anonymous request;
-2. validates the prompt and the publication choice together through the shared
-   Zod schema;
-3. checks the owner's indexed one-hour generation count;
-4. calls Cloudflare Workers AI;
-5. writes the returned bytes to public Blob storage;
-6. writes the generation row, including the validated publication boolean;
-7. revalidates `/generate`;
-8. expires the `public-gallery` tag and revalidates `/`, but only when the row
-   that was written is public;
-9. returns a discriminated success or failure result.
+2. validates all five fields together through the shared Zod schema, including
+   the model-and-size pair;
+3. checks the owner's indexed one-hour generation count **against the number of
+   images requested**;
+4. calls Cloudflare Workers AI, once per requested image, sequentially;
+5. writes each returned image's bytes to public Blob storage;
+6. writes each generation row, including the validated publication boolean;
+7. revalidates `/generate` once, when at least one row was written;
+8. expires the `public-gallery` tag and revalidates `/` once, but only when at
+   least one row that was written is public;
+9. returns a discriminated result carrying every generation that succeeded and
+   a count of the ones that did not.
 
 The prompt must contain content after trimming and may contain at most 500
 characters.
+
+### The three controls, and partial success (prompt 015)
+
+`model`, `size` and `count` are closed lists validated against
+`lib/ai/catalog.ts`. `count` is one of `1`, `2` or `4`. The model and size are
+only valid as a pair: each model declares its own sizes, and a `superRefine`
+rejects a size the chosen model does not declare, before any provider call.
+
+The hourly floor is now count-aware. It rejects when
+`requested > 20 - recentCount`, so a batch cannot walk past the cap one image
+at a time, and the message says how many remain. It still does not model the
+account-wide neuron allocation, which stays step 9's problem.
+
+Generation is **sequential, not parallel**: per-account concurrency on Workers
+AI is unverified, and a serial loop keeps a partial failure legible.
+
+**A request for several images can succeed in part.** Rows and blobs are
+written per image as each one succeeds, and the result is:
+
+```ts
+{ ok, error, generations: GenerationResult[], failed: number }
+```
+
+`ok: true` with a non-zero `failed` is a truthful partial result, reported to
+the user as such. Only a request where nothing was written is `ok: false`. The
+per-image blob cleanup on a failed row insert is unchanged.
 
 ### Publication consent
 
@@ -294,6 +323,81 @@ currently unused for this provider. It stays because nothing in Cloudflare's
 documentation promises JPEG, and the media type decides the stored file's
 extension.
 
+## The model registry (prompt 015)
+
+`lib/ai/model.ts` is deleted. `lib/ai/catalog.ts` replaces it with a typed
+registry keyed by model id, holding label, note, beta flag, step count, size
+list, body style and response style, plus `DEFAULT_MODEL_ID`,
+`IMAGE_MODEL_IDS`, `getModel` and `getModelSize`.
+
+**`lib/ai/catalog.ts` deliberately carries no `import "server-only"`**, which is
+the one documented exception to AGENTS.md §6.3's rule for `lib/ai/`. It is pure
+data, reads no environment variable and imports nothing, and three places need
+it: the shared schema, the client leaf that renders the selects, and the action.
+`lib/ai/generate.ts` keeps `server-only` and stays the only module that reads
+`CLOUDFLARE_ACCOUNT_ID` or `CLOUDFLARE_API_TOKEN`. The catalog does reach the
+browser bundle, which is intended: it is a list of public model names and image
+sizes.
+
+### The two models, and why only two
+
+| Model | Sizes offered | Body sent | Response | Neuron cost |
+| --- | --- | --- | --- | --- |
+| `@cf/black-forest-labs/flux-1-schnell` (default) | Square 1024 x 1024 only | `{ prompt, steps: 4 }`, no dimensions | JSON, `result.image` base64 | 57.60 per image at the measured size |
+| `@cf/bytedance/stable-diffusion-xl-lightning` (beta) | Square 1024 x 1024, Landscape 1280 x 768, Portrait 768 x 1280 | `{ prompt, width, height, num_steps: 4 }` | **raw image bytes** | **none published.** Its pricing row reads `$0.00 per step` and the response carried `cf-ai-neurons: 0.00` |
+
+The default model takes no dimensions at all, which is why the control is a
+per-model size list rather than a site-wide aspect-ratio control. A ratio
+selector would be a lie on the default model.
+
+**The Leonardo models are excluded on arithmetic, not taste**, and the exclusion
+is recorded so a later session does not re-add them. Read from the pricing page
+on 2026-08-13: `@cf/leonardo/lucid-origin` costs 636.00 neurons per tile plus
+12.00 per step, so one 1024 x 1024 image is four tiles at 2,544 neurons before
+steps. Against the account-wide 10,000 neuron daily allocation that is **three
+images for the entire product per day**. `@cf/leonardo/phoenix-1.0` is 530.00
+per tile and no better. Putting either in a user-facing select would let one
+person exhaust the product for everybody in under a minute.
+
+### The SDXL-Lightning response, measured because it is undocumented
+
+Its model page documents a `ReadableStream` for the Workers binding and says
+nothing about the REST envelope, so it was probed directly on **2026-08-13**:
+
+```
+HTTP/2 200
+content-type: image/png
+content-length: 55379
+cf-ai-neurons: 0.00
+```
+
+```
+file: JPEG image data, JFIF standard 1.01, baseline, precision 8, 1024x576
+```
+
+Three facts came out of that, and each one is load-bearing:
+
+1. **The REST response is the raw image body, not the JSON envelope.** Passing
+   it to `response.json()` would fail on the first byte. `responseStyle:
+   "binary"` on the registry entry selects `arrayBuffer()` instead.
+2. **The `content-type` header lied.** It said `image/png` over bytes that begin
+   `ff d8 ff e0`, which is JPEG. This is the direct reason the media type is
+   sniffed off the bytes for **every** model rather than read from the header:
+   trusting it would have written JPEG bytes to a `.png` blob path.
+3. **The measured cost is 0.00 neurons**, from the response's own
+   `cf-ai-neurons` header, consistent with the pricing table having no neuron
+   row for this model. Recorded as measured, not inferred.
+
+A failure on the binary path arrives as a JSON body inside a 200. It is caught
+by `readImage` returning null, and the bytes are then read back as JSON to
+recover Cloudflare's error detail, so the 200-with-`success:false` rule holds on
+both response styles. The 400-versus-everything-else split and both
+`ImageGenerationError` kinds are unchanged.
+
+**Both paths still run `readImage` on the returned bytes**, including the model
+that was asked for a specific size, so the stored dimensions and media type stay
+measured rather than assumed.
+
 ## Storage
 
 Generated images are written to
@@ -361,6 +465,77 @@ A generation is private unless its owner opted in when creating it. Publishing
 transmits the image URL and its stored dimensions to anonymous visitors, and
 nothing else the query selects. See the known gap under the public gallery read
 for what the URL itself still carries.
+
+## Verification, prompt 015
+
+Run on 2026-08-13.
+
+- `npm run lint` produced no output beyond npm's own two notice lines, exit 0.
+- `npm run build` succeeded, TypeScript included: `Compiled successfully in
+  3.1s`, `Finished TypeScript in 2.3s`, 17 static pages generated.
+- **Route table compared, not assumed.** Built, stashed the eight changed
+  source paths, rebuilt, and diffed. `IDENTICAL`. No route changed its render
+  mode and no route was added.
+- **`/`'s prerendered HTML compared byte for byte**, which is stronger than the
+  screenshot comparison the prompt asked for and is now the recorded procedure
+  in `docs/automation.md`. `.next/server/app/index.html` is 110,782 bytes both
+  before and after, and the only differences are content-hashed chunk filenames
+  and the build id. With those normalised the markup is identical, so
+  `PromptField`'s new `controls` prop changes nothing on the landing page.
+- **Environment-absent build passed** and `.env.local` was restored.
+- **Client-bundle secret scan:** `CLOUDFLARE_API_TOKEN`,
+  `CLOUDFLARE_ACCOUNT_ID`, `BLOB_READ_WRITE_TOKEN` and `DATABASE_URL` each
+  matched **0** files under `.next/static/`. `CLERK_SECRET_KEY` matched one
+  file, and the context was read before reporting it: it is Clerk's own SDK
+  enumerating `process.env` key **names**
+  (`i.default.env.CLERK_SECRET_KEY, i.default.env.CLERK_MACHINE_SECRET_KEY, …`).
+  Searching for the secret's actual 50-character value returned **0** files.
+  This is the same class of false positive `docs/automation.md` already records
+  for `CLOUDFLARE`, and it is pre-existing rather than introduced here.
+- **Both model paths exercised for real** through the registry-driven code, not
+  through curl:
+
+  | Call | Result |
+  | --- | --- |
+  | flux-1-schnell, square | 1024x1024 `image/jpeg`, 271,387 B, 5,248 ms |
+  | SDXL-Lightning, landscape | 1280x768 `image/jpeg`, 32,664 B, 5,026 ms |
+  | SDXL-Lightning, portrait | 768x1280 `image/jpeg`, 38,470 B, 3,012 ms |
+
+  The requested dimensions came back exactly, and both were measured off the
+  bytes rather than trusted from the request. Latencies are warm-path and
+  include no database access.
+- **The closed lists were tested against the schema**, each case run through
+  `generationRequestSchema`:
+
+  | Case | Outcome |
+  | --- | --- |
+  | flux + square, count 2 | accepted, `count=2` as a number |
+  | flux + landscape | rejected, "That image size is not available for the chosen model." |
+  | SDXL + landscape, count 4 | accepted |
+  | `@cf/leonardo/lucid-origin` | rejected, "Choose a model from the list." |
+  | count 3, count 99 | both rejected, "Choose how many images to generate." |
+
+- **Auth enforcement confirmed in the browser**: `/generate` while signed out
+  redirected to `/sign-in?redirect_url=…%2Fgenerate`.
+- **One signed-in end-to-end run through the real form**, at the default model
+  and size with count 1. The stored row, read back with the read-only query:
+
+  | Column | Value |
+  | --- | --- |
+  | `model` | `@cf/black-forest-labs/flux-1-schnell` |
+  | `width`, `height` | 1024, 1024 |
+  | `right(image_url, 4)` | `.jpg` |
+  | `is_public` | `false`, the checkbox being unchecked |
+
+  The new `model`, `size` and `count` fields therefore reach the action, parse,
+  and write a correct row through the real form.
+- **Still unverified:** an SDXL run at a non-square size and a count-of-2 run,
+  both through the UI. The browser tooling could not drive the selects on this
+  page: `read_page` returned an empty tree and `javascript_tool` was blocked by
+  the extension, and this was stopped rather than retried further. The provider
+  side of both is verified above by direct calls, including 1280x768 and
+  768x1280 coming back at exactly those dimensions; what remains unconfirmed is
+  only the select-to-row path for a non-default model and a count above one.
 
 ## Verification, prompt 014
 

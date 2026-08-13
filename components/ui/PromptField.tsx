@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, type FormEvent } from "react";
+import { useId, type FormEvent, type ReactNode } from "react";
 import { useFormStatus } from "react-dom";
 
 /**
@@ -31,11 +31,18 @@ function GenerateButton() {
 export function PromptField({
   action,
   describedBy,
+  controls,
   showPublishOption = false,
   className = "mt-7",
 }: {
   action?: (formData: FormData) => void | Promise<void>;
   describedBy?: string;
+  /**
+   * Real generate form only, like `showPublishOption`. Nothing is rendered
+   * when it is absent, not even a wrapper, so the landing page's markup is
+   * unchanged.
+   */
+  controls?: ReactNode;
   /** Real generate form only. The landing page's copy of this field is inert. */
   showPublishOption?: boolean;
   className?: string;
@@ -70,6 +77,8 @@ export function PromptField({
         />
         <GenerateButton />
       </div>
+
+      {controls ?? null}
 
       {/* Publication is explicit and off by default. The name and value are
           the closed pair `lib/validation/generation.ts` accepts; they are

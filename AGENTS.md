@@ -496,7 +496,8 @@ components/
   app/                    the signed-in surfaces
 lib/
   db/         schema, client, queries        server-only
-  ai/         gateway call, model registry   server-only
+  ai/         the provider call              server-only
+  ai/catalog.ts  the public model registry   deliberately NOT server-only
   storage/    blob upload and read           server-only
   auth/       session and ownership          server-only
   validation/ shared schemas                 NOT server-only, deliberately
@@ -505,8 +506,11 @@ lib/
 
 Every module under `lib/` that touches a secret carries `import "server-only"`
 at the top — the import exists to make a mistaken client import a **build**
-error rather than a leaked key at runtime. **`lib/validation/` is the one
-exception and must stay one**: its schemas are imported by client leaves *and*
+error rather than a leaked key at runtime. **`lib/ai/catalog.ts` is the second
+exception, approved in prompt 015**: it is pure data with no environment read
+and no imports, and the schema, the client leaf and the action all need the same
+closed list (`docs/backend.md`). **`lib/validation/` is the other exception and
+must stay one**: its schemas are imported by client leaves *and*
 by actions, which is what makes "the rules exist once and run twice" true
 (§10 rule 1). Nothing that reads a secret may be added to it, and it must not
 import from `lib/db/` — a schema module's table definitions have no business in

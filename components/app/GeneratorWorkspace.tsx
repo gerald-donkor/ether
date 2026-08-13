@@ -1,8 +1,13 @@
 "use client";
 
-import { useActionState, useEffect, useRef } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { PromptField } from "@/components/ui/PromptField";
+import {
+  DEFAULT_GENERATION_LAYOUT,
+  GenerationControls,
+  type GenerationLayout,
+} from "@/components/app/GenerationControls";
 import {
   generateGeneration,
   type GenerationActionState,
@@ -12,8 +17,37 @@ import {
 const INITIAL_STATE: GenerationActionState = {
   ok: null,
   error: null,
-  generation: null,
+  generations: [],
+  failed: 0,
 };
+
+function countPhrase(count: number) {
+  return `${count} ${count === 1 ? "image" : "images"}`;
+}
+
+function statusMessage(
+  state: GenerationActionState,
+  layout: GenerationLayout,
+  pending: boolean,
+) {
+  if (pending) return `Generating ${countPhrase(layout.count)}.`;
+  if (state.error) return state.error;
+  if (state.ok !== true) return "Your next image will appear here.";
+
+  const made = state.generations.length;
+  const privacy = state.generations[0].isPublic
+    ? "Published to the public gallery."
+    : made === 1
+      ? "It stays private."
+      : "They stay private.";
+
+  // A partial result is reported as one, rather than as a plain success that
+  // quietly delivered fewer images than were asked for.
+  const shortfall =
+    state.failed > 0 ? ` ${countPhrase(state.failed)} failed.` : "";
+
+  return `${countPhrase(made)} generated and saved.${shortfall} ${privacy}`;
+}
 
 export function GeneratorWorkspace({
   initialGenerations,
@@ -24,11 +58,28 @@ export function GeneratorWorkspace({
     generateGeneration,
     INITIAL_STATE,
   );
+  const [layout, setLayout] = useState<GenerationLayout>(
+    DEFAULT_GENERATION_LAYOUT,
+  );
   const announcementRef = useRef<HTMLParagraphElement>(null);
 
   useEffect(() => {
     if (state.ok !== null) announcementRef.current?.focus();
   }, [state]);
+
+  // The slots exist before the response does, at the shape the controls asked
+  // for, so the image arrives into a box that was already the right size. Once
+  // images exist, each slot takes its own stored dimensions.
+  const results = state.ok === true ? state.generations : [];
+  const slotCount = results.length > 0 ? results.length : layout.count;
+  const slots = Array.from(
+    { length: slotCount },
+    (_, index) => results[index] ?? null,
+  );
+  const slotSizes =
+    slotCount > 1
+      ? "(max-width: 639px) calc(100vw - 40px), (max-width: 1023px) calc((100vw - 60px) / 2), 360px"
+      : "(max-width: 1023px) calc(100vw - 40px), 720px";
 
   return (
     <div className="space-y-20">
@@ -40,30 +91,47 @@ export function GeneratorWorkspace({
           Describe the image you need.
         </h1>
         <p className="text-text-2 mt-5 max-w-[52ch] text-[15px] leading-[26px]">
-          Write a concrete prompt. Ether will generate one image and keep it in
-          your history.
+          Write a concrete prompt, choose a model and a size, and Ether will keep
+          the results in your history.
         </p>
         <PromptField
           action={formAction}
           describedBy="generation-status"
+          controls={<GenerationControls onLayoutChange={setLayout} />}
           showPublishOption
           className="mt-8 max-w-[760px]"
         />
 
         <div className="mt-10 grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(240px,1fr)] lg:items-start">
-          <div className="bg-surface rounded-panel relative aspect-square overflow-hidden">
-            {state.generation ? (
-              <Image
-                src={state.generation.imageUrl}
-                alt={state.generation.prompt}
-                fill
-                sizes="(max-width: 1023px) calc(100vw - 40px), 720px"
-                className="object-cover"
-              />
-            ) : null}
+          <div className="relative">
+            <div
+              className={`grid gap-4 ${slotCount > 1 ? "sm:grid-cols-2" : ""}`}
+            >
+              {slots.map((slot, index) => (
+                <div
+                  key={slot?.id ?? `slot-${index}`}
+                  className="bg-surface rounded-panel relative overflow-hidden"
+                  style={{
+                    aspectRatio: slot
+                      ? `${slot.width} / ${slot.height}`
+                      : `${layout.width} / ${layout.height}`,
+                  }}
+                >
+                  {slot ? (
+                    <Image
+                      src={slot.imageUrl}
+                      alt={slot.prompt}
+                      fill
+                      sizes={slotSizes}
+                      className="object-cover"
+                    />
+                  ) : null}
+                </div>
+              ))}
+            </div>
 
             {pending ? (
-              <div className="bg-ink/65 absolute inset-0 flex items-center justify-center">
+              <div className="bg-ink/65 rounded-panel absolute inset-0 flex items-center justify-center">
                 <div
                   aria-hidden="true"
                   className="size-24 animate-spin rounded-pill p-[2px] opacity-50 motion-reduce:animate-none"
@@ -84,18 +152,11 @@ export function GeneratorWorkspace({
               tabIndex={-1}
               className={state.ok === false ? "text-text" : "text-text-2"}
             >
-              {pending
-                ? "Generating your image."
-                : state.error ??
-                  (state.generation
-                    ? state.generation.isPublic
-                      ? "Image generated, saved, and published to the public gallery."
-                      : "Image generated and saved. It stays private."
-                    : "Your next image will appear here.")}
+              {statusMessage(state, layout, pending)}
             </p>
-            {state.generation ? (
+            {results.length > 0 ? (
               <p className="text-text-3 mt-4 text-[13px] leading-[22px]">
-                {state.generation.prompt}
+                {results[0].prompt}
               </p>
             ) : null}
           </div>

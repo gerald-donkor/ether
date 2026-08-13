@@ -1,6 +1,6 @@
 import "server-only";
 
-import { IMAGE_MODEL } from "./model";
+import { getModel, getModelSize } from "./catalog";
 
 const CLOUDFLARE_ACCOUNTS_ENDPOINT =
   "https://api.cloudflare.com/client/v4/accounts";
@@ -67,10 +67,12 @@ function readJpegDimensions(bytes: Uint8Array) {
 }
 
 /**
- * The model takes no width or height, and its documentation states neither the
- * output size nor the encoding, so both are read off the bytes that arrived.
- * The media type decides the stored file's extension, so guessing it would
- * write a mislabelled blob.
+ * The size and the encoding are read off the bytes that arrived, for every
+ * model, including the one the request asked for a size from. The default
+ * model documents neither. The other returns a raw body whose `content-type`
+ * header said `image/png` over JPEG bytes when it was measured on 2026-08-13,
+ * so the header cannot be trusted either. The media type decides the stored
+ * file's extension, so guessing it would write a mislabelled blob.
  */
 function readImage(bytes: Uint8Array) {
   const png = readPngDimensions(bytes);
@@ -89,7 +91,27 @@ function describeErrors(errors: CloudflareRunResponse["errors"]) {
     .join("; ");
 }
 
-export async function generateImageForPrompt(prompt: string) {
+/** Both response styles report a failure as a JSON envelope, so an error body
+ * is read the same way whether the success path would have been bytes or
+ * JSON. */
+function describeErrorBody(body: string) {
+  try {
+    const payload = JSON.parse(body) as CloudflareRunResponse;
+    return describeErrors(payload.errors);
+  } catch {
+    return "no readable error detail returned";
+  }
+}
+
+export async function generateImageForPrompt({
+  prompt,
+  modelId,
+  sizeKey,
+}: {
+  prompt: string;
+  modelId: string;
+  sizeKey: string;
+}) {
   // Read inside the function, never at module scope. `next build` evaluates
   // top-level module code, so a client built at import time against an unset
   // variable would fail the build before any route renders.
@@ -102,19 +124,47 @@ export async function generateImageForPrompt(prompt: string) {
     );
   }
 
+  // The schema rejects an unknown model or a size the model does not declare
+  // before anything reaches here, so either one arriving now is a bug in this
+  // codebase rather than a state the user can be told to act on.
+  const model = getModel(modelId);
+  if (!model) {
+    throw new ImageGenerationError(
+      "provider_unavailable",
+      `Unknown model id: ${modelId}`,
+    );
+  }
+
+  const size = getModelSize(model, sizeKey);
+  if (!size) {
+    throw new ImageGenerationError(
+      "provider_unavailable",
+      `Unknown size "${sizeKey}" for model ${modelId}`,
+    );
+  }
+
+  const body =
+    model.bodyStyle === "prompt-dimensions"
+      ? {
+          prompt,
+          width: size.width,
+          height: size.height,
+          num_steps: model.steps,
+        }
+      : // There is no width or height parameter to send for this style.
+        { prompt, steps: model.steps };
+
   let response: Response;
   try {
     response = await fetch(
-      `${CLOUDFLARE_ACCOUNTS_ENDPOINT}/${accountId}/ai/run/${IMAGE_MODEL}`,
+      `${CLOUDFLARE_ACCOUNTS_ENDPOINT}/${accountId}/ai/run/${model.id}`,
       {
         method: "POST",
         headers: {
           Authorization: `Bearer ${apiToken}`,
           "Content-Type": "application/json",
         },
-        // `steps` is the only other documented input and 4 is its default.
-        // There is no width or height parameter to send.
-        body: JSON.stringify({ prompt, steps: 4 }),
+        body: JSON.stringify(body),
       },
     );
   } catch {
@@ -124,6 +174,53 @@ export async function generateImageForPrompt(prompt: string) {
     );
   }
 
+  if (!response.ok) {
+    const detail = describeErrorBody(await response.text().catch(() => ""));
+
+    // 400 is the provider rejecting this particular request. Every other
+    // status is the provider being unusable: unauthorized, throttled, or down.
+    throw new ImageGenerationError(
+      response.status === 400 ? "generation_rejected" : "provider_unavailable",
+      `HTTP ${response.status}. ${detail}`,
+    );
+  }
+
+  const bytes =
+    model.responseStyle === "binary"
+      ? await readBinaryBody(response)
+      : await readJsonBody(response);
+
+  const image = readImage(bytes);
+  if (!image) {
+    // A binary-style model reports a model error as a JSON body inside a 200,
+    // which lands here as bytes that are not an image.
+    const detail = describeErrorBody(Buffer.from(bytes).toString("utf8"));
+    throw new ImageGenerationError(
+      "generation_rejected",
+      `The image provider returned no usable image. ${detail}`,
+    );
+  }
+
+  return {
+    bytes,
+    mediaType: image.mediaType,
+    width: image.width,
+    height: image.height,
+  };
+}
+
+async function readBinaryBody(response: Response) {
+  try {
+    return new Uint8Array(await response.arrayBuffer());
+  } catch {
+    throw new ImageGenerationError(
+      "provider_unavailable",
+      `The image provider returned an unreadable body. HTTP ${response.status}.`,
+    );
+  }
+}
+
+async function readJsonBody(response: Response) {
   let payload: CloudflareRunResponse;
   try {
     payload = (await response.json()) as CloudflareRunResponse;
@@ -131,15 +228,6 @@ export async function generateImageForPrompt(prompt: string) {
     throw new ImageGenerationError(
       "provider_unavailable",
       `The image provider returned an unreadable response. HTTP ${response.status}.`,
-    );
-  }
-
-  if (!response.ok) {
-    // 400 is the provider rejecting this particular request. Every other
-    // status is the provider being unusable: unauthorized, throttled, or down.
-    throw new ImageGenerationError(
-      response.status === 400 ? "generation_rejected" : "provider_unavailable",
-      `HTTP ${response.status}. ${describeErrors(payload.errors)}`,
     );
   }
 
@@ -160,19 +248,5 @@ export async function generateImageForPrompt(prompt: string) {
     );
   }
 
-  const bytes = new Uint8Array(Buffer.from(encoded, "base64"));
-  const image = readImage(bytes);
-  if (!image) {
-    throw new ImageGenerationError(
-      "provider_unavailable",
-      "The image provider returned an unsupported image format.",
-    );
-  }
-
-  return {
-    bytes,
-    mediaType: image.mediaType,
-    width: image.width,
-    height: image.height,
-  };
+  return new Uint8Array(Buffer.from(encoded, "base64"));
 }
