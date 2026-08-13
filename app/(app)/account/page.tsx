@@ -2,13 +2,35 @@ import { UserButton } from "@clerk/nextjs";
 import { currentUser } from "@clerk/nextjs/server";
 import { Container } from "@/components/ui/Container";
 import { requireUserId } from "@/lib/auth";
+import { PROVIDER_UNITS_PER_NEURON } from "@/lib/ai/catalog";
+import { readOwnerUsageSummary } from "@/lib/db/quotas";
 import { countGenerationsForUser } from "@/lib/db/queries";
+
+function formatResetTime(date: Date) {
+  return new Intl.DateTimeFormat("en", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+    timeZoneName: "short",
+  }).format(date);
+}
+
+function formatProviderUnits(units: number) {
+  return new Intl.NumberFormat("en", { maximumFractionDigits: 1 }).format(
+    units / PROVIDER_UNITS_PER_NEURON,
+  );
+}
+
+function formatImageCount(count: number) {
+  return `${count} ${count === 1 ? "image" : "images"}`;
+}
 
 export default async function AccountPage() {
   const userId = await requireUserId();
-  const [user, generationCount] = await Promise.all([
+  const [user, generationCount, usage] = await Promise.all([
     currentUser(),
     countGenerationsForUser(userId),
+    readOwnerUsageSummary(userId),
   ]);
 
   const email =
@@ -64,6 +86,66 @@ export default async function AccountPage() {
             </dd>
           </div>
         </dl>
+
+        <section
+          aria-labelledby="usage-title"
+          className="border-line mt-12 border-t pt-8"
+        >
+          <h2 id="usage-title" className="text-text text-[22px] leading-[30px]">
+            Generation usage
+          </h2>
+
+          {usage.available ? (
+            <dl className="mt-8 grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
+              <div>
+                <dt className="text-text-3 text-[12px] font-medium tracking-[0.12em] uppercase">
+                  Used this hour
+                </dt>
+                <dd className="text-grad-stat mt-3 text-[40px] leading-none">
+                  {usage.rollingUsed}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-text-3 text-[12px] font-medium tracking-[0.12em] uppercase">
+                  Remaining this hour
+                </dt>
+                <dd className="text-grad-stat mt-3 text-[40px] leading-none">
+                  {usage.rollingRemaining}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-text-3 text-[12px] font-medium tracking-[0.12em] uppercase">
+                  Window reset
+                </dt>
+                <dd className="text-text mt-3 text-[15px] leading-[26px]">
+                  {usage.rollingResetAt
+                    ? formatResetTime(usage.rollingResetAt)
+                    : "No active window"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-text-3 text-[12px] font-medium tracking-[0.12em] uppercase">
+                  Accepted today
+                </dt>
+                <dd className="text-text mt-3 text-[15px] leading-[26px]">
+                  {formatImageCount(usage.dailyAcceptedImages)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-text-3 text-[12px] font-medium tracking-[0.12em] uppercase">
+                  Compute used today
+                </dt>
+                <dd className="text-text mt-3 text-[15px] leading-[26px]">
+                  {formatProviderUnits(usage.dailyProviderUnits)} units
+                </dd>
+              </div>
+            </dl>
+          ) : (
+            <p className="text-text-2 mt-6 text-[15px] leading-[26px]">
+              Usage unavailable
+            </p>
+          )}
+        </section>
       </section>
     </Container>
   );

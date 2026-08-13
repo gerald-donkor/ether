@@ -84,6 +84,35 @@ column and index, then creates `generations_visibility_created_at_idx`.
 Existing false rows remain private. The production result was 7 private rows,
 0 unlisted rows and 1 public row, preserving all 8 records.
 
+### `usage_events`
+
+Prompt 021 adds durable accepted quota reservations. The table is deliberately
+independent from `generations`: a provider, Blob, or row failure after
+reservation still consumed shared capacity, and removing or permanently
+deleting a generation does not refund it.
+
+| Column | PostgreSQL type | Constraint or purpose |
+| --- | --- | --- |
+| `id` | `uuid` | Primary key, defaults to `gen_random_uuid()` |
+| `user_id` | `text` | Not null, server-derived Clerk owner id |
+| `model` | `text` | Not null, validated catalog model id |
+| `image_count` | `integer` | Not null and greater than zero, accepted batch size |
+| `provider_units` | `integer` | Not null and nonnegative, tenths of a neuron reserved for the batch |
+| `created_at` | `timestamp with time zone` | Not null, defaults to `now()` |
+
+Indexes are the primary key and
+`usage_events_user_created_at_idx (user_id, created_at desc)`. `EXPLAIN` used
+that index for the rolling owner query and used the same composite index for
+the bounded UTC-day provider query. A second time-only index was therefore not
+added.
+
+`drizzle/0004_dry_sir_ram.sql` creates the table, constraints and index, then
+adds
+`reserve_generation_quota(text, text, integer, integer)`. The function returns
+`outcome`, `owner_window_used`, `owner_window_remaining`, and a real
+`reset_at` when one is derivable. Its outcomes are `accepted`,
+`account_limit`, and `provider_capacity`.
+
 The database predated Drizzle's migration journal because migrations 0000
 through 0002 had been applied with schema push. Consequently the CLI migration
 wrapper could not safely infer history. Prompt 018 applied migration 0003 with
@@ -103,13 +132,18 @@ Available queries:
 
 - list the newest 24 generations for one owner;
 - count all generations for one owner;
-- count one owner's generations since a supplied timestamp;
 - insert one generation and return the stored row;
 - list the newest public generations for the landing gallery and Community;
 - read one generation by id **and** owner;
 - read the consent-safe anonymous projection for one shareable generation;
 - update one live generation's visibility by id **and** owner;
 - delete one generation by id **and** owner, returning its id.
+
+`lib/db/quotas.ts` is the separate quota query boundary. It calls the database
+function once to reserve a validated batch and reads one owner's rolling-hour
+and current-UTC-day usage for `/account`. The owner id appears in every owner
+predicate. The account read takes no lock, inserts nothing, and returns no
+application-wide provider balance.
 
 ### The public gallery read
 
@@ -147,8 +181,8 @@ The action:
 1. reads the Clerk session and rejects an anonymous request;
 2. validates all five fields together through the shared Zod schema, including
    the model-and-size pair;
-3. checks the owner's indexed one-hour generation count **against the number of
-   images requested**;
+3. resolves the batch's integer provider cost from the closed model catalog and
+   atomically reserves owner and shared provider capacity in Neon;
 4. calls Cloudflare Workers AI, once per requested image, sequentially;
 5. writes each returned image's bytes to public Blob storage;
 6. writes each generation row, including the validated visibility;
@@ -168,10 +202,9 @@ characters.
 only valid as a pair: each model declares its own sizes, and a `superRefine`
 rejects a size the chosen model does not declare, before any provider call.
 
-The hourly floor is now count-aware. It rejects when
-`requested > 20 - recentCount`, so a batch cannot walk past the cap one image
-at a time, and the message says how many remain. It still does not model the
-account-wide neuron allocation, which stays step 9's problem.
+The quota reservation is count-aware. A request for 1, 2, or 4 images reserves
+that whole batch before the first model call, so concurrent requests cannot
+walk past either the rolling account limit or the shared provider ceiling.
 
 Generation is **sequential, not parallel**: per-account concurrency on Workers
 AI is unverified, and a serial loop keeps a partial failure legible.
@@ -214,13 +247,65 @@ the tag `unstable_cache` stored.
 There is no mutation for changing an existing generation's visibility. No
 client-supplied generation id is accepted **on the generate path**; prompt 016
 adds the first action that accepts one, and the rules it validates and
-authorises that id against are below. The temporary spending floor allows fewer than 20 generations in
-the preceding hour. It is not a distributed rate limiter. Step 9 replaces it
-with Upstash and product-level quotas.
+authorises that id against are below. The durable reservation described below
+is the only generation quota decision.
 
 Provider, Blob, and database failures become actionable client messages. Server
 logs remove the user's prompt before recording error details. If the Blob write
 succeeds but the database insert fails, the action attempts to delete the Blob.
+
+## Quotas and usage reading (prompt 021)
+
+Prompt 020 first proposed Upstash. The live Vercel Marketplace checkpoint
+showed only billable Redis plans, and the user required a completely free
+alternative. Prompt 021 superseded it with the already-connected Neon database.
+No Redis resource, package, variable, or billing relationship exists. This
+introduces no new service charge, but it does not make Neon unlimited: the
+existing database remains subject to its finite plan allowances.
+
+`reserve_generation_quota` acquires one Ether-namespaced
+`pg_advisory_xact_lock` before either quota read. It is transaction-level, not
+session-level, so it is compatible with the application's pooled PgBouncer
+transaction mode and is released automatically at statement transaction end.
+One short global critical section serializes all instances; the lock is never
+held during a model call.
+
+Inside that transaction the function:
+
+1. sums one owner's accepted `image_count` over the exact preceding hour;
+2. calculates a rejected batch's usable retry time from stored event expiries;
+3. sums all `provider_units` since 00:00 UTC;
+4. rejects a batch that would cross either ceiling;
+5. inserts exactly one `usage_events` row only when both checks pass.
+
+The account ceiling remains 20 accepted images per rolling hour. Provider
+reservations use tenths of a neuron, the smallest integer scale that represents
+both verified catalog costs. The shared daily ceiling is therefore 100,000
+units. FLUX reserves 1,728 units per image from the live 172.80-neuron response
+header measured on 2026-08-13. SDXL Lightning reserves zero, matching its live
+`0.00` header, but still consumes account image capacity.
+
+Database errors and malformed function results fail closed as
+`quota_unavailable`; no model call follows. Account-limit copy includes a time
+only when the database returned a real event-derived timestamp. Provider-limit
+copy exposes neither the ceiling nor aggregate use.
+
+A crash after acceptance but before the provider call conservatively leaves the
+reservation spent. That is intentional: refunding across model, storage and row
+failures would require a second distributed state machine and would weaken the
+capacity boundary the reservation exists to enforce.
+
+The counter begins with migration 0004. Calls made earlier in the same UTC day
+have no durable reservation to backfill without inventing an owner, so the
+first partial day can understate provider use. Cloudflare's own hard free-plan
+refusal remains the final boundary for that one transition day; every accepted
+application request after the migration is represented.
+
+`/account` starts Clerk identity, live-image inventory and its owner-only usage
+summary together. It reports rolling used and remaining images, the next real
+window expiry, and that owner's accepted image count and compute use for the
+current UTC day. A failed usage read renders `Usage unavailable`; global
+remaining provider capacity is never selected or rendered.
 
 ## The generation permalink and its delete (prompt 016)
 
@@ -321,13 +406,13 @@ builder keeps search and paging links consistent.
 
 The query layer now filters live rows with `deleted_at IS NULL` in
 `listGenerationsForUser`, `countGenerationsForUser`,
-`getGenerationForOwner`, and `listPublicGenerations`. The deliberate exception
-is `countRecentGenerationsForUser`: it counts removed rows too because it is a
-spending floor, not an inventory count. `listLibraryPage` filters on owner and
-the selected lifecycle state, escapes `\\`, `%`, and `_` before an `ilike`
-search, orders newest first, and reads one extra row to determine whether an
-older page exists without a second count. The `public-generations` cache tag is
-expired only when a changed row was public.
+`getGenerationForOwner`, and `listPublicGenerations`. Quota spend no longer
+reads generation inventory at all; durable `usage_events` survive every
+generation lifecycle state. `listLibraryPage` filters on owner and the selected
+lifecycle state, escapes `\\`, `%`, and `_` before an `ilike` search, orders
+newest first, and reads one extra row to determine whether an older page exists
+without a second count. The `public-generations` cache tag is expired only when
+a changed row was public.
 
 `removeGeneration` and `restoreGeneration` are Server Actions in
 `app/(app)/library/actions.ts`. Both authenticate with Clerk, validate the
@@ -487,22 +572,25 @@ than assumed. The row was written by a generation made through the form at
 | Encoding | **JPEG** | `right(image_url, 4)` returned `.jpg`, and the extension comes from the media type `readImage` detected off the bytes |
 | Model id stored | `@cf/black-forest-labs/flux-1-schnell` | `model` on the same row |
 
-Neuron cost, computed from the published formula and the measured size:
+The published pricing-table arithmetic for the measured size is:
 
 - 1024 x 1024 is **4** 512x512 tiles, at 4.80 neurons each: **19.20**
 - 4 steps at 9.60 neurons each: **38.40**
 - **57.60 neurons per image**
 
-Against the 10,000 neuron daily allocation that is **173 images per day**
-account-wide (57.60 x 173 = 9,964.8; a 174th would exceed it). This figure is
-for this document only and appears in no user-visible string.
+That arithmetic did not match the live response header when Prompt 021
+re-measured it on 2026-08-13. One real 1024 x 1024 request with `steps: 4`
+returned `cf-ai-neurons: 172.80`. The limiter uses the higher measured value,
+not the lower documentation-derived value. Against the 10,000-neuron daily
+allocation, 57 such images reserve 9,849.6 neurons and a 58th would reserve
+10,022.4. These figures are build-record calculations and appear in no
+user-visible string.
 
-**The per-user cap does not protect this ceiling.** The 20-per-hour count in
-`actions.ts` permits 480 generations per day from a single account, which is
-2.8x the account-wide allocation, so one user can exhaust the free tier in
-about nine hours and every other user then receives the
-`provider_unavailable` message. Step 9 owns quotas and must model the
-account-wide allocation, not just per-user rate.
+The provider documentation still lists 4.80 neurons per tile and 9.60 per
+step, so the 3x difference is recorded as an unresolved provider discrepancy.
+The response header is the closest available measurement of what the account
+was actually charged. Prompt 021's shared UTC-day reservation now prevents the
+application from knowingly crossing that measured allocation.
 
 Because the encoding is confirmed JPEG in practice, `readImage`'s PNG branch is
 currently unused for this provider. It stays because nothing in Cloudflare's
@@ -529,7 +617,7 @@ sizes.
 
 | Model | Sizes offered | Body sent | Response | Neuron cost |
 | --- | --- | --- | --- | --- |
-| `@cf/black-forest-labs/flux-1-schnell` (default) | Square 1024 x 1024 only | `{ prompt, steps: 4 }`, no dimensions | JSON, `result.image` base64 | 57.60 per image at the measured size |
+| `@cf/black-forest-labs/flux-1-schnell` (default) | Square 1024 x 1024 only | `{ prompt, steps: 4 }`, no dimensions | JSON, `result.image` base64 | 172.80 per image from the live response header |
 | `@cf/bytedance/stable-diffusion-xl-lightning` (beta) | Square 1024 x 1024, Landscape 1280 x 768, Portrait 768 x 1280 | `{ prompt, width, height, num_steps: 4 }` | **raw image bytes** | **none published.** Its pricing row reads `$0.00 per step` and the response carried `cf-ai-neurons: 0.00` |
 
 The default model takes no dimensions at all, which is why the control is a
@@ -647,8 +735,10 @@ Vercel environment.
 ## User data
 
 Ether stores the Clerk owner id, prompt, generated image URL, model id, decoded
-dimensions, the visibility choice, and creation time. It reads the user's
-email and join date from Clerk for `/account` but does not store them locally.
+dimensions, the visibility choice, and creation time. For accepted quota
+reservations it also stores the owner id, model id, image count, scaled provider
+units and timestamp. It reads the user's email and join date from Clerk for
+`/account` but does not store them locally.
 Prompts, emails, request bodies, publication payloads, provider credentials,
 and Blob tokens are not logged.
 
@@ -657,6 +747,77 @@ Unlisted and public exact-link reads transmit the image URL, model, dimensions,
 visibility and creation time, but never the prompt or owner. Only public rows
 reach `/` and `/community`. Canonical Blob URLs no longer contain the Clerk
 owner id.
+
+## Verification, prompt 021
+
+Run on 2026-08-13.
+
+- Live Cloudflare pages still listed the 10,000-neuron free daily allocation,
+  its 00:00 UTC reset, FLUX's 4.80-neuron tile and 9.60-neuron step rates, and
+  SDXL Lightning at `$0.00 per step`. Direct provider probes returned HTTP 200
+  for both catalog models. FLUX reported `cf-ai-neurons: 172.80` with an
+  `application/json` response; SDXL reported `0.00` with the known misleading
+  `image/png` header. Neither probe was stored as user content.
+- `npm run db:generate` reported 2 tables and created
+  `drizzle/0004_dry_sir_ram.sql`. Inspection found only the additive table,
+  constraints and owner/time index before the reviewed function was appended.
+  `npm run db:migrate` ended with `migrations applied successfully!` through
+  the direct connection. The Drizzle migration journal count moved from 1 to
+  2.
+- Read-only schema verification returned all six expected columns and defaults,
+  the primary key plus `usage_events_user_created_at_idx`, and exactly one
+  function with identity arguments
+  `p_user_id text, p_model text, p_image_count integer, p_provider_units
+  integer`. Its result is the four-column typed quota outcome recorded above.
+- `EXPLAIN` used `usage_events_user_created_at_idx` directly for the rolling
+  owner window. The bounded UTC-day query also used that composite index
+  through a bitmap index scan, so the conditional time-only index was not
+  added.
+- The isolated quota suite printed true for count 1 plus count 4 consumption,
+  account concurrency, event-derived reset validity, exact charged-model cost,
+  cross-owner global concurrency, zero-cost provider bypass with account spend,
+  rejected-event absence, read-only snapshot behavior, owner isolation,
+  generation lifecycle independence, database-failure closure and malformed
+  result closure. Five concurrent four-image reservations reached exactly the
+  20-image owner ceiling; a sixth was rejected. At the global boundary one of
+  two concurrent charged reservations was accepted and one rejected. Cleanup
+  returned true for both generation rows and usage events.
+- `npm run lint`, `node_modules/.bin/tsc --noEmit`, and `git diff --check`
+  exited 0. The visible-copy audit found no em-dash, separator en-dash,
+  exclamation mark, raw component hex, arbitrary z-index, invented statistic,
+  or hype in the changed interface.
+- The required Turbopack `npm run build` remains blocked by the documented host
+  failure while processing `app/globals.css`: `creating new process`, `binding
+  to a port`, `Operation not permitted (os error 1)`. The same failure occurred
+  with elevated execution and is not reported as a passed build.
+- The documented `npm run build -- --webpack` fallback compiled successfully,
+  finished TypeScript, generated all 18 pages, and preserved the complete route
+  table. `/` and `/community` remain static; `/account`, `/generate`,
+  `/library`, and `/g/[id]` remain dynamic; no route was added.
+- The webpack build also passed with `.env.local` absent and the file was
+  restored. The before and after landing documents were both 123,825 bytes and
+  the documented hash/build-id normalization diff exited 0.
+- Client output contained zero value hits for `DATABASE_URL`,
+  `DATABASE_URL_UNPOOLED`, `BLOB_READ_WRITE_TOKEN`, `CLERK_SECRET_KEY`,
+  `CLOUDFLARE_ACCOUNT_ID`, and `CLOUDFLARE_API_TOKEN`. Every name hit was zero
+  except Clerk's known one-file SDK enumeration; its context contains only
+  environment key names and its value hit was zero.
+- Against the production server, anonymous `/` returned 200. Anonymous
+  `/generate` and `/account` each returned 307 to the local sign-in route with
+  Clerk's `signed-out` status.
+
+Not run, and why:
+
+- **Signed-in generation and `/account` browser pass.** No reusable Clerk
+  browser session existed. The action's database boundary and account summary
+  ran against isolated synthetic owners without forging authentication, but
+  those checks are not presented as an authenticated end-to-end submission.
+- **Landing motion playback.** No settled landing or motion file changed, and
+  the complete prerendered document is identical, but motion was not
+  re-recorded.
+
+The concurrency procedure was worked out for the first time here, so
+`docs/automation.md` does not add it yet.
 
 ## Verification, prompt 017
 

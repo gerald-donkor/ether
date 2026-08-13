@@ -42,7 +42,12 @@ export type ImageModel = {
   bodyStyle: "prompt-steps" | "prompt-dimensions";
   /** Measured from a real call, never taken from the model page. */
   responseStyle: "json-base64" | "binary";
+  /** Tenths of a neuron reserved before one provider call. */
+  providerUnitsPerImage: number;
 };
+
+/** The smallest integer scale that represents every verified catalog cost. */
+export const PROVIDER_UNITS_PER_NEURON = 10;
 
 export const IMAGE_MODEL_IDS = [FLUX_SCHNELL_ID, SDXL_LIGHTNING_ID] as const;
 
@@ -55,8 +60,10 @@ export const IMAGE_MODELS: Readonly<Record<ImageModelId, ImageModel>> = {
    *
    * Takes `prompt`, `seed` and `steps` only, so there is no width or height to
    * send and the single size below is the output measured in docs/backend.md.
-   * Cost, from the same page on 2026-08-13: 4.80 neurons per 512x512 tile plus
-   * 9.60 per step, so 57.60 neurons for one 1024x1024 image at 4 steps.
+   * Cloudflare's pricing table still lists 4.80 neurons per 512x512 tile and
+   * 9.60 per step. A live 1024x1024 call on 2026-08-13 returned the more
+   * conservative `cf-ai-neurons: 172.80`, so reservations use that measured
+   * response cost until the provider reconciles the discrepancy.
    */
   [FLUX_SCHNELL_ID]: {
     id: FLUX_SCHNELL_ID,
@@ -67,6 +74,7 @@ export const IMAGE_MODELS: Readonly<Record<ImageModelId, ImageModel>> = {
     sizing: "native",
     bodyStyle: "prompt-steps",
     responseStyle: "json-base64",
+    providerUnitsPerImage: 1728,
     sizes: [
       { key: "square", label: "Square, 1024 x 1024", width: 1024, height: 1024 },
     ],
@@ -94,6 +102,7 @@ export const IMAGE_MODELS: Readonly<Record<ImageModelId, ImageModel>> = {
     sizing: "explicit",
     bodyStyle: "prompt-dimensions",
     responseStyle: "binary",
+    providerUnitsPerImage: 0,
     sizes: [
       { key: "square", label: "Square, 1024 x 1024", width: 1024, height: 1024 },
       {
@@ -113,7 +122,7 @@ export const IMAGE_MODELS: Readonly<Record<ImageModelId, ImageModel>> = {
 };
 
 /**
- * The default is the model whose cost was measured: 57.60 neurons an image
+ * The default is the model whose cost was measured: 172.80 neurons an image
  * against an account-wide allocation of 10,000 neurons a day.
  */
 export const DEFAULT_MODEL_ID: ImageModelId = FLUX_SCHNELL_ID;

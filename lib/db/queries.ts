@@ -6,7 +6,6 @@ import {
   count,
   desc,
   eq,
-  gte,
   ilike,
   inArray,
   isNotNull,
@@ -20,8 +19,7 @@ import type { GenerationVisibility } from "@/lib/generations/visibility";
 /**
  * A removed row is invisible everywhere the owner reads their own work, so the
  * filter belongs in the query rather than in the component that renders it
- * (AGENTS.md 6.2). The one deliberate exception is
- * `countRecentGenerationsForUser`, which says why below.
+ * (AGENTS.md 6.2).
  */
 export async function listGenerationsForUser(userId: string, limit = 24) {
   return getDb()
@@ -40,29 +38,6 @@ export async function countGenerationsForUser(userId: string) {
     .from(generations)
     .where(
       and(eq(generations.userId, userId), isNull(generations.deletedAt)),
-    );
-
-  return row?.value ?? 0;
-}
-
-/**
- * The hourly floor, and the one read that counts removed rows too. The
- * provider was already paid for a removed image, so excluding it would let a
- * user reset their own quota by pressing Remove. This counts spend, not
- * inventory.
- */
-export async function countRecentGenerationsForUser(
-  userId: string,
-  since: Date,
-) {
-  const [row] = await getDb()
-    .select({ value: count() })
-    .from(generations)
-    .where(
-      and(
-        eq(generations.userId, userId),
-        gte(generations.createdAt, since),
-      ),
     );
 
   return row?.value ?? 0;

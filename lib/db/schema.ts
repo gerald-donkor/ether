@@ -1,4 +1,6 @@
+import { sql } from "drizzle-orm";
 import {
+  check,
   index,
   integer,
   pgEnum,
@@ -51,5 +53,36 @@ export const generations = pgTable(
   ],
 );
 
+/**
+ * One row is one accepted generation reservation. It is deliberately separate
+ * from `generations`: failed provider or storage work still consumed shared
+ * capacity, and deleting an image must not refund that spend.
+ */
+export const usageEvents = pgTable(
+  "usage_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id").notNull(),
+    model: text("model").notNull(),
+    imageCount: integer("image_count").notNull(),
+    providerUnits: integer("provider_units").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("usage_events_user_created_at_idx").on(
+      table.userId,
+      table.createdAt.desc(),
+    ),
+    check("usage_events_image_count_positive", sql`${table.imageCount} > 0`),
+    check(
+      "usage_events_provider_units_nonnegative",
+      sql`${table.providerUnits} >= 0`,
+    ),
+  ],
+);
+
 export type Generation = typeof generations.$inferSelect;
 export type NewGeneration = typeof generations.$inferInsert;
+export type UsageEvent = typeof usageEvents.$inferSelect;

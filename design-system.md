@@ -261,6 +261,16 @@ The status line is unchanged in mechanism and honest about a partial result: it
 reports how many images were generated, how many failed, and whether they were
 published, through the same `role="status"` node that still takes focus.
 
+`/account` keeps its identity record and adds one usage group beneath a single
+`--line` hairline. The group stays inside `--container`, uses the existing 22px
+heading, 12px uppercase labels, 15px/26px explanatory text and real-result
+number roles, and collapses from three columns to one below `sm`. It reports
+the owner's rolling-hour images used and remaining, the next real expiry when
+one exists, and the owner's accepted images and compute units for the current
+UTC day. A failed usage read says `Usage unavailable` and never substitutes a
+zero. Global provider capacity is absent. There is no card, icon, progress bar,
+new token, radius, colour, interaction, or motion.
+
 ### 2.9 Marketing information routes
 
 `/learn`, `/build`, `/product`, and `/community` extend the marketing shell as
@@ -499,8 +509,8 @@ generated images, and Cloudflare Workers AI runs the image model, which
 replaced the Vercel AI Gateway on 2026-08-13. Ether does not duplicate Clerk
 users in Postgres.
 
-Generation ships with an indexed per-owner count over the preceding hour,
-capped at 20 calls. This is a spending floor rather than a distributed limiter;
-Upstash is the documented upgrade path in build step 9. The full schema,
-migration, action flow, model record, and environment contract live in
-`docs/backend.md`.
+Generation reserves capacity through the existing Neon database before the
+first model call. One transaction-level advisory lock serializes the rolling
+owner limit and shared UTC-day provider limit with the durable usage-event
+insert. The full schema, migration, action flow, model record, quota arithmetic,
+and environment contract live in `docs/backend.md`.

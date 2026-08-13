@@ -2,15 +2,16 @@
 
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath, updateTag } from "next/cache";
+import { getModel } from "@/lib/ai/catalog";
 import {
   generateImageForPrompt,
   ImageGenerationError,
 } from "@/lib/ai/generate";
 import {
-  countRecentGenerationsForUser,
   createGeneration,
   PUBLIC_GENERATIONS_TAG,
 } from "@/lib/db/queries";
+import { reserveGenerationQuota } from "@/lib/db/quotas";
 import type { GenerationVisibility } from "@/lib/generations/visibility";
 import {
   deleteGenerationImage,
@@ -24,9 +25,6 @@ import {
   PUBLISH_FIELD,
   SIZE_FIELD,
 } from "@/lib/validation/generation";
-
-/** The first-line hourly spending cap, counted per account. */
-const HOURLY_LIMIT = 20;
 
 export type GenerationResult = {
   id: string;
@@ -57,6 +55,15 @@ function failure(error: string): GenerationActionState {
   return { ok: false, error, generations: [], failed: 0 };
 }
 
+function formatResetTime(resetAt: Date) {
+  return new Intl.DateTimeFormat("en", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+    timeZoneName: "short",
+  }).format(resetAt);
+}
+
 export async function generateGeneration(
   _previousState: GenerationActionState,
   formData: FormData,
@@ -81,30 +88,34 @@ export async function generateGeneration(
 
   const { prompt, model: modelId, size: sizeKey, count } = parsed.data;
   const visibility = parsed.data.publish;
+  const model = getModel(modelId);
+  if (!model) {
+    return failure("Usage could not be checked. Try again shortly.");
+  }
 
-  try {
-    // This indexed count is a first-line spending cap, not a distributed rate
-    // limiter. Step 9 replaces it with Upstash when quotas become a product.
-    //
-    // It also does not model the account-wide daily neuron allocation, which
-    // is a second ceiling every user shares. Exhausting that is a provider
-    // refusal, not something this check can see coming.
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-    const recentCount = await countRecentGenerationsForUser(userId, oneHourAgo);
-    const remaining = Math.max(0, HOURLY_LIMIT - recentCount);
+  const providerUnits = model.providerUnitsPerImage * count;
+  const quota = await reserveGenerationQuota({
+    userId,
+    model: modelId,
+    imageCount: count,
+    providerUnits,
+  });
 
-    // Checked against the number requested, before the first call, so a batch
-    // cannot walk past the cap one image at a time.
-    if (count > remaining) {
-      return failure(
-        remaining === 0
-          ? `The hourly limit of ${HOURLY_LIMIT} images has been reached. Try again later.`
-          : `Only ${remaining} more ${remaining === 1 ? "image" : "images"} can be generated this hour. Ask for fewer.`,
-      );
-    }
-  } catch (error) {
-    console.error("Generation quota check failed.", safeErrorMessage(error, prompt));
-    return failure("Usage could not be checked. Try again in a moment.");
+  if (quota.status === "account_limit") {
+    const retry = quota.resetAt
+      ? ` Try again after ${formatResetTime(quota.resetAt)}.`
+      : "";
+    return failure(
+      `This account has reached its current generation limit.${retry}`,
+    );
+  }
+
+  if (quota.status === "provider_capacity") {
+    return failure("The generator's daily capacity has been reached.");
+  }
+
+  if (quota.status === "unavailable") {
+    return failure("Usage could not be checked. Try again shortly.");
   }
 
   const generations: GenerationResult[] = [];

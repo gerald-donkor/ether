@@ -201,6 +201,7 @@ Scripts that currently exist in `package.json`:
 - `npm run start` — run the production build locally after `npm run build`
 - `npm run lint` — ESLint
 - `npm run db:generate` — generate a Drizzle migration from the schema
+- `npm run db:migrate` — apply committed Drizzle migrations with `.env.local`
 - `npm run db:push` — apply the Drizzle schema with `.env.local` loaded
 
 Report the exact command output; never claim a check passed without running it
@@ -366,7 +367,7 @@ getting to step 4 quickly.
 | 6 | **The image route** — `/g/[id]`, a permalink for one generation: full-size view, prompt, model, download, delete. Owner-only until step 8 makes sharing real | 1 |
 | 7 | **The library** — `/library`, the user's generations with pagination, prompt search, and soft delete. The history grid on `/generate` shrinks to a recent strip that links here | 1, 6 |
 | 8 | **Sharing and the community showcase** — a share link for a public generation, and `/community` reading real public work rather than a static page | 4, 6 |
-| 9 | **Quotas and real rate limiting** — Upstash Redis and `@upstash/ratelimit` replacing step 1's `count(*)` floor, per-account caps, and a usage reading on `/account` | 1, and step 1's comment naming Upstash as the upgrade path |
+| 9 | **Quotas and real rate limiting** — the existing Neon database replacing step 1's `count(*)` floor with an atomic reservation function, per-account caps, and a usage reading on `/account` | 1, and step 1's temporary count floor |
 | 10 | **Moderation and abuse handling** — prompt and output screening on the generate path, a report route on shared images, and a takedown state that hides an image without destroying the record | 8, 9 |
 | 11 | **Account and data rights** — generation defaults, export, and account deletion that actually removes the blobs as well as the rows | 7 |
 
@@ -552,7 +553,7 @@ beyond that** — read it from `vercel env ls` and `vercel integration list`
 | identity | **Clerk**, via the Marketplace | `@clerk/nextjs` | resource `clerk-byzantine-curtain`; needed a browser terms acceptance and an explicit `integration resource connect` |
 | image storage | **Vercel Blob**, store `ether-images` | `@vercel/blob` | public access, because these are rendered in an `<img>` on a page the user already loaded |
 | the model | **Cloudflare Workers AI** | none — REST over `fetch` | authenticated by `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`. Chosen because its free daily neuron allocation refuses rather than bills, so no card is required. Replaced the AI Gateway on 2026-08-13 (§5.3 rule 1) |
-| rate limiting | **Upstash Redis** — *not provisioned* | `@upstash/redis` + `@upstash/ratelimit` | step 9. Step 1 ships an indexed `count(*)` floor instead and says so in a comment |
+| rate limiting | **Neon Postgres** | existing Drizzle and a PostgreSQL reservation function | step 9 uses durable usage events plus one transaction-level advisory lock. No second service, package, secret, or billing relationship |
 
 `@vercel/postgres` and `@vercel/kv` **no longer exist** as first-party products.
 Do not import either; do not reintroduce them from training data.
@@ -755,7 +756,6 @@ the two Clerk publishable names:
 | `VERCEL_OIDC_TOKEN` | 1 | Vercel. No longer read for generation after prompt 014 |
 | `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN` | prompt 014 | **ours, set by hand** in `.env.local` and in the Vercel project. The names are this project's choice; the REST API dictates neither (§12 rule 6) |
 | `NEXT_PUBLIC_CLERK_SIGN_IN_URL` / `..._SIGN_UP_URL` | 1 | **ours, set by hand** in `.env.local` and in the Vercel project |
-| Upstash's REST url and token | 9 | read the names back from `vercel env ls` after provisioning — **do not predict them** |
 
 Do not invent a variable name before the step that provisions it.
 

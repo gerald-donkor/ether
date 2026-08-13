@@ -12,7 +12,7 @@ environment:
 ```bash
 npm install
 vercel env pull .env.local --yes
-npm run db:push
+npm run db:migrate
 npm run dev
 ```
 
@@ -46,6 +46,7 @@ Gateway image requests can run. Without it, Vercel returns
 - `npm run start`: run a completed production build.
 - `npm run lint`: run ESLint.
 - `npm run db:generate`: generate a migration from the Drizzle schema.
+- `npm run db:migrate`: apply committed migrations with `.env.local` loaded.
 - `npm run db:push`: apply the Drizzle schema with `.env.local` loaded.
 
 The backend build record is in [`docs/backend.md`](docs/backend.md). The visual
