@@ -44,9 +44,10 @@ session that skips the read will re-derive it by hand or silently break it.
 | `public/assets/ui/ref/AI Generator.pdf` / `.svg` | the single 1440 × 3392 pt reference artboard every measurement in `design-system.md` comes from |
 | `README.md` | how to run the project, and the environment variables it needs |
 | `docs/backend.md` | the backend build record: schema column types, migrations, model choice, actions, routes, environment variables, and verified provider details |
+| `docs/automation.md` | steps worked out twice by hand and written down as commands: read-only database queries, route-table comparison, the environment-absent build, the client-bundle secret scan |
 
-There is no automation notes file yet; §3 says what to do about that. Do not
-cite it as though it existed (§12 rule 1).
+`docs/automation.md` exists as of 2026-08-13 and §3 says how it grows. Read it
+before working out a repeated step by hand.
 
 # Invariants
 
@@ -220,13 +221,15 @@ scope.
 
 # 3. Automation
 
-There is no automation notes file yet. **Standing instruction:** each session,
+`docs/automation.md` holds the commands. **Standing instruction:** each session,
 watch for steps repeated by hand — screenshot comparison of `/` before and after
 a change, extracting a raster from the reference PDF, diffing a build's route
-table — and when a step has been worked out twice, write it into
-`docs/automation.md`, create that file, and add it to the index at the top of
-this file in the same change. The point is that a later session starts from the
-command rather than from the investigation.
+table — and when a step has been worked out twice, add it to
+`docs/automation.md` in the same change. The point is that a later session
+starts from the command rather than from the investigation.
+
+Still uncaptured, because each has been done only once: screenshot comparison
+of `/` across breakpoints, and extracting a raster from the reference PDF.
 
 # 4. Prompt files
 

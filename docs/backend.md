@@ -262,17 +262,37 @@ provider string before it reaches a log.
 
 ### Measured output size and cost
 
-**Not yet measured.** No live generation has run, because
-`CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` have no values yet. The
-dimensions the model returns, the per-image neuron cost computed from them with
-the published formula, and the resulting images-per-day ceiling are recorded
-here after the first successful generation, read out of the `generations` row
-rather than assumed. No images-per-day figure goes into any user-visible
-string.
+**Measured on 2026-08-13**, read out of the first real `generations` row rather
+than assumed. The row was written by a generation made through the form at
+`/generate`, not by a synthetic insert.
 
-The account-wide neuron allocation is a **second ceiling** that the per-user
-20-per-hour count in `actions.ts` does not model. Step 9 owns quotas and does
-not currently account for it.
+| Measurement | Value | How it was read |
+| --- | --- | --- |
+| Output size | **1024 x 1024** | `width`, `height` on the stored row |
+| Encoding | **JPEG** | `right(image_url, 4)` returned `.jpg`, and the extension comes from the media type `readImage` detected off the bytes |
+| Model id stored | `@cf/black-forest-labs/flux-1-schnell` | `model` on the same row |
+
+Neuron cost, computed from the published formula and the measured size:
+
+- 1024 x 1024 is **4** 512x512 tiles, at 4.80 neurons each: **19.20**
+- 4 steps at 9.60 neurons each: **38.40**
+- **57.60 neurons per image**
+
+Against the 10,000 neuron daily allocation that is **173 images per day**
+account-wide (57.60 x 173 = 9,964.8; a 174th would exceed it). This figure is
+for this document only and appears in no user-visible string.
+
+**The per-user cap does not protect this ceiling.** The 20-per-hour count in
+`actions.ts` permits 480 generations per day from a single account, which is
+2.8x the account-wide allocation, so one user can exhaust the free tier in
+about nine hours and every other user then receives the
+`provider_unavailable` message. Step 9 owns quotas and must model the
+account-wide allocation, not just per-user rate.
+
+Because the encoding is confirmed JPEG in practice, `readImage`'s PNG branch is
+currently unused for this provider. It stays because nothing in Cloudflare's
+documentation promises JPEG, and the media type decides the stored file's
+extension.
 
 ## Storage
 
@@ -365,19 +385,42 @@ Run on 2026-08-13.
   `fy("Cloudflare-Workers")?"CLOUDFLARE":…`, which predates this change and is
   unrelated.
 
+**Live generation, confirmed the same day.** After the credentials were set, a
+generation made through the form at `/generate` returned an image, and a
+read-only query against `generations` found exactly one row: 1024 x 1024,
+`model=@cf/black-forest-labs/flux-1-schnell`, `is_public=true`, stored as
+`.jpg`. That single row exercises the whole path end to end: the endpoint
+responded, the envelope parsed, the base64 decoded, the magic-byte detection
+picked a media type that matched the real encoding, the blob was written, and
+the row was inserted with measured rather than assumed dimensions.
+
 Not verified, and why:
 
-- **A live generation.** `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`
-  have no values yet, so no request has reached Cloudflare. Nothing here
-  confirms the endpoint responds, the base64 decodes, the dimensions are real,
-  or the row is written. The response handling above is built from the
-  documentation cited, and the measured output size is explicitly recorded as
-  outstanding.
-- **The invalid-token path returning the new unavailable wording.** Same
-  reason. With both variables unset, that path is reached through the
-  missing-variable branch rather than through a 401, which is not the same test.
-- **`.env.local` was not edited.** The two keys are absent from it and were
-  added by hand by the user rather than by this change.
+- **The `provider_unavailable` path reached through a 401.** With both
+  variables now set, that branch is only reachable by deliberately breaking the
+  token. What has been exercised is the missing-variable branch, which returns
+  the same message through a different code path. The 401 and 429 branches are
+  reasoned from the status-code split, not observed.
+- **The `generation_rejected` path.** No prompt has been refused, so neither
+  the HTTP 400 branch nor the `success: false` branch has run.
+- **A second concurrent user.** Nothing here tests the account-wide neuron
+  ceiling or two accounts generating at once.
+
+### Environment variable gotcha, worth not rediscovering
+
+Both variables were first added with `vercel env add` answering **yes** to
+"Store as sensitive?". That produced entries scoped to Production and Preview
+only, with unreadable values, and the dev server had no credentials at all.
+Two documented constraints cause it: *"Sensitive environment variables are
+environment variables whose values are non-readable once created"*, so
+`vercel env pull` cannot bring them down, and *"You can only create sensitive
+environment variables in the preview and production environments"*, so
+Development cannot be selected.
+
+The resolution kept the sensitive Production and Preview entries, which are
+still decrypted at deploy runtime, and added a separate non-sensitive
+Development-scoped entry for each so `vercel env pull .env.local --yes`
+populates local development and survives future pulls.
 
 ## Verification, prompt 013
 
