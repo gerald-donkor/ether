@@ -32,6 +32,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               Generate
             </Link>
             <Link
+              href="/library"
+              className="text-text-2 hover:text-text text-[14px] transition-colors"
+            >
+              Library
+            </Link>
+            <Link
               href="/account"
               className="text-text-2 hover:text-text text-[14px] transition-colors"
             >

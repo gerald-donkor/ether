@@ -24,6 +24,12 @@ export const generations = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
+    // The library's undo layer, and not the delete mechanism. A stamped row
+    // leaves every listing while its Blob object stays fetchable, which is
+    // exactly what makes restore possible and exactly why permanent deletion
+    // is a separate operation that removes both. See docs/backend.md.
+    // NULL means live, so every row written before this column existed is.
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (table) => [
     index("generations_user_id_idx").on(table.userId),

@@ -173,10 +173,11 @@ export function GeneratorWorkspace({
           id="history-title"
           className="text-text text-[clamp(28px,5vw,40px)] leading-[1.45] font-normal tracking-[-0.01em]"
         >
-          Your recent images
+          Recent images
         </h2>
 
         {initialGenerations.length > 0 ? (
+          <>
           <ul className="mt-8 grid gap-x-5 gap-y-9 sm:grid-cols-2 lg:grid-cols-3">
             {initialGenerations.map((generation) => (
               <li key={generation.id}>
@@ -200,6 +201,15 @@ export function GeneratorWorkspace({
               </li>
             ))}
           </ul>
+          <p className="mt-8">
+            <Link
+              href="/library"
+              className="text-text hover:text-text-2 rounded-sm text-[13px] transition-colors"
+            >
+              See every image in your library
+            </Link>
+          </p>
+          </>
         ) : (
           <p className="text-text-3 mt-5 text-[15px]">
             Generate an image to start your history.

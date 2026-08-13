@@ -3,6 +3,7 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 const isProtectedRoute = createRouteMatcher([
   "/generate(.*)",
   "/account(.*)",
+  "/library(.*)",
   "/g(.*)",
 ]);
 
@@ -13,5 +14,10 @@ export default clerkMiddleware(async (auth, request) => {
 });
 
 export const config = {
-  matcher: ["/generate/:path*", "/account/:path*", "/g/:path*"],
+  matcher: [
+    "/generate/:path*",
+    "/account/:path*",
+    "/library/:path*",
+    "/g/:path*",
+  ],
 };

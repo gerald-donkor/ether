@@ -184,7 +184,7 @@ Blob images render through `next/image` under the existing `/generations/**` rem
 ### 2.8 Application shell
 
 The authenticated shell uses a compact 64px header over `--container`, with the
-wordmark left and `Generate`, `Account`, and the Clerk user control right. It
+wordmark left and `Generate`, `Library`, `Account`, and the Clerk user control right. It
 has no marketing footer.
 
 `/generate` is a single form-led column. The title and promoted prompt field
@@ -315,6 +315,34 @@ the caption taking the established `--text-2` to `--text` hover transition.
 **No new token, radius, colour or z-index level, and no row in §3** - nothing
 on this route animates beyond the existing link hover and the button's
 `active:scale`.
+
+### 2.12 Generation library
+
+`/library` is the owner's ledger: a full-width list of work, separated by
+hairlines rather than remade as a second image grid. Each row has a 64px square
+`--r-card` thumbnail, the prompt as its reading column, quiet model, size and
+date metadata, and actions at the right. This is a distinct layout family from
+the form-led generator and image-led record.
+
+The heading takes the `clamp(36px,7vw,64px)` role. A native GET search form
+uses a real label, a `--surface-2` `--r-pill` field, and the established ghost
+control treatment. The two views, `Your images` and `Removed`, are ordinary
+links that preserve a search and reset pagination. The active view carries
+`aria-current="page"`. Pagination reports only the current page and whether a
+newer or older page exists, rather than inventing a total.
+
+Active prompts link to their artefact record. Removed prompts deliberately do
+not, because their records return 404 until restored. Remove is a two-step
+confirmation in markup with focus moved to the confirmation and restored to
+the opener on cancellation. Restore is one press. Both results use a mounted
+`role="status"` region, so the outcome is announced and does not rely on
+colour. Permanent deletion is available only from Removed and follows the
+existing permanent-delete flow.
+
+`/generate` now receives six newest live images, retaining its two-row
+three-column history shape and linking to the full library. The library adds no
+token, radius, colour, z-index level or motion. No §3 row is added: only the
+existing link hover and button `active:scale` feedback apply.
 
 ---
 

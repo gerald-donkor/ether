@@ -38,6 +38,7 @@ Drizzle owns the schema in `lib/db/schema.ts`. The committed migration is
 | `height` | `integer` | Not null, decoded from the returned image |
 | `is_public` | `boolean` | Not null, defaults to `false`. The owner's publication choice |
 | `created_at` | `timestamp with time zone` | Not null, defaults to `now()` |
+| `deleted_at` | `timestamp with time zone` | Nullable. The timestamp of a library removal. `NULL` means live. |
 
 Indexes:
 
@@ -64,6 +65,17 @@ because `strict` is set in `drizzle.config.ts`, so it was applied as
 read and confirmed additive. A read-only `information_schema.columns` and
 `pg_indexes` query then confirmed the type, the `false` default, `NOT NULL`,
 and the new index.
+
+`deleted_at` arrived with `drizzle/0002_natural_skin.sql` on 2026-08-13:
+
+```sql
+ALTER TABLE "generations" ADD COLUMN "deleted_at" timestamp with time zone;
+```
+
+The nullable column is the library's undo layer, not the permanent-delete
+mechanism. Existing rows remain live without a backfill, and no index was
+added: owner listings still enter through `generations_user_created_at_idx` on
+`(user_id, created_at desc)`, then filter the narrowed rows by `deleted_at`.
 
 **`is_public` is a boolean, and step 8 will have to migrate it.** `AGENTS.md`
 §9 rule 3 foresees `private | unlisted | public` arriving with sharing and
@@ -284,6 +296,45 @@ Clerk id, which is the known gap recorded under the public gallery read.
 static marketing route starts paying for auth per request. `/generate`'s
 history cards become links to `/g/<id>`; the card's markup gains a `Link`
 wrapper and a hover colour transition on the caption, and nothing else changes.
+
+## The generation library (prompt 017)
+
+`/library` is a protected dynamic Server Component. It awaits its query
+parameters, reads the owner through `requireUserId()`, and renders an
+owner-filtered ledger. `proxy.ts` includes `/library` in both protected-route
+matchers, but the page still checks its own session.
+
+`lib/validation/library.ts` owns the `q`, `page`, and `view` query names. The
+search is trimmed and capped at 500 characters, page is a positive integer up
+to 500, and view is the closed `active | removed` list. Invalid or repeated URL
+values fall back safely, so hand-edited URLs render the default view instead of
+throwing. The native GET form retains the current view, and the shared URL
+builder keeps search and paging links consistent.
+
+The query layer now filters live rows with `deleted_at IS NULL` in
+`listGenerationsForUser`, `countGenerationsForUser`,
+`getGenerationForOwner`, and `listPublicGenerations`. The deliberate exception
+is `countRecentGenerationsForUser`: it counts removed rows too because it is a
+spending floor, not an inventory count. `listLibraryPage` filters on owner and
+the selected lifecycle state, escapes `\\`, `%`, and `_` before an `ilike`
+search, orders newest first, and reads one extra row to determine whether an
+older page exists without a second count. The public-gallery cache tag is
+expired only when a changed row was public.
+
+`removeGeneration` and `restoreGeneration` are Server Actions in
+`app/(app)/library/actions.ts`. Both authenticate with Clerk, validate the
+generation UUID, authorise within an owner-filtered update, return a
+discriminated result, and revalidate `/library` and `/generate`. A public row
+also expires the landing gallery tag and revalidates `/`. Neither action runs a
+quota check because neither spends provider money. Not-found and not-owned both
+return `That image could not be found.`
+
+`getGenerationForOwnerIncludingRemoved` is restricted to permanent deletion.
+The existing deletion action uses it so a removed row can still be destroyed
+from the Removed view. Its optional `returnTo` field is accepted only as
+`/generate` or `/library`, with `/generate` as the fallback; it cannot become
+an open redirect. It now revalidates `/library` as well as the existing
+surfaces.
 
 ## AI model
 
@@ -552,6 +603,42 @@ A generation is private unless its owner opted in when creating it. Publishing
 transmits the image URL and its stored dimensions to anonymous visitors, and
 nothing else the query selects. See the known gap under the public gallery read
 for what the URL itself still carries.
+
+## Verification, prompt 017
+
+Run on 2026-08-13.
+
+- `npm run lint` completed with exit 0. `node_modules/.bin/tsc --noEmit` also
+  completed with exit 0; there is no project typecheck script yet.
+- The read-only direct-Neon schema check returned one `deleted_at` column with
+  `data_type: timestamp with time zone`, `is_nullable: YES`, and
+  `column_default: null`. Its index list is unchanged:
+  `generations_pkey`, `generations_public_created_at_idx`,
+  `generations_user_created_at_idx`, and `generations_user_id_idx`.
+- The query-layer check deliberately printed no owner, prompt, or Blob URL. It
+  found 8 active rows for its selected owner, 0 results for a literal `%`
+  search, and confirmed the nonexistent-id soft-delete is a no-op. This
+  verifies that escaped `%` does not become a match-all pattern.
+- With the dev server running, anonymous `HEAD /library` was Clerk-protected
+  (`x-clerk-auth-status: signed-out`), while anonymous `HEAD /` was `200`.
+- Client static-output scan returned 0 files for `DATABASE_URL`,
+  `BLOB_READ_WRITE_TOKEN`, `CLERK_SECRET_KEY`, and `CLOUDFLARE_API_TOKEN`.
+  Searching the actual Clerk secret value also returned 0 files. This scan is
+  against the current dev output because the production build below could not
+  complete in this execution environment.
+- **Production build is blocked by the execution environment, not reported as
+  passed.** `npm run build` reaches the CSS entry point then Turbopack fails
+  creating a local process socket with `Operation not permitted (os error 1)`.
+  Retrying after clearing a stale generated `.next/dev/lock` and with elevated
+  command permission produced the same result. `next build --webpack` also
+  failed before compiling the application, while parsing TypeScript's emitted
+  config. The environment-absent build, route-table comparison, and prerendered
+  landing HTML comparison therefore could not be rerun from the final tree.
+- The signed-in browser checks remain unrun in this environment: there is no
+  active Clerk browser session to remove, restore, or permanently delete a
+  real generation. No mutation of user content was attempted merely to satisfy
+  a check. The route, query, schema, and type checks above are the completed
+  substitutes, not a claim of end-to-end action verification.
 
 ## Verification, prompt 016
 

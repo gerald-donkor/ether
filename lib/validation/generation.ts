@@ -72,5 +72,12 @@ export const PUBLISH_VALUE = "public";
  */
 export const generationIdSchema = z.uuid("That image could not be found.");
 
-/** The delete form's only field, so the form and the parser cannot drift. */
+/** The id field on the delete, remove and restore forms. */
 export const GENERATION_ID_FIELD = "generationId";
+
+/**
+ * Where a permanent delete returns to. The name lives here so the form and the
+ * action cannot drift; the closed list of accepted values lives in the action,
+ * because it is the server that decides where a redirect may land.
+ */
+export const RETURN_TO_FIELD = "returnTo";

@@ -5,13 +5,14 @@ import { revalidatePath, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import {
   deleteGenerationForOwner,
-  getGenerationForOwner,
+  getGenerationForOwnerIncludingRemoved,
   PUBLIC_GALLERY_TAG,
 } from "@/lib/db/queries";
 import { deleteGenerationImage } from "@/lib/storage/generations";
 import {
   GENERATION_ID_FIELD,
   generationIdSchema,
+  RETURN_TO_FIELD,
 } from "@/lib/validation/generation";
 
 /**
@@ -30,6 +31,19 @@ export type DeleteGenerationState =
  * people's work.
  */
 const NOT_FOUND = "That image could not be found.";
+
+/**
+ * Where the redirect lands, as a closed list of exactly two paths. The field
+ * arrives from the browser, and an open redirect through a user-supplied path
+ * is the failure this guard exists to prevent: anything not on the list falls
+ * back to the default rather than being followed.
+ */
+const RETURN_TO_PATHS = ["/generate", "/library"] as const;
+const DEFAULT_RETURN_TO = "/generate";
+
+function returnPath(value: FormDataEntryValue | null) {
+  return RETURN_TO_PATHS.find((path) => path === value) ?? DEFAULT_RETURN_TO;
+}
 
 /**
  * A provider or database message can quote the row it failed on, and a blob
@@ -69,11 +83,14 @@ export async function deleteGeneration(
   // c. No quota check. Deleting spends no provider money and frees storage,
   // so there is nothing here for a rate limit to protect.
 
+  const destination = returnPath(formData.get(RETURN_TO_FIELD));
+
   // d. Authorise by reading the row the caller owns. A wrong owner and a
-  // missing row are the same answer.
+  // missing row are the same answer. The read includes removed rows, so a row
+  // in the library's Removed view can still be destroyed for good.
   let row;
   try {
-    row = await getGenerationForOwner(parsed.data, userId);
+    row = await getGenerationForOwnerIncludingRemoved(parsed.data, userId);
   } catch (error) {
     console.error("Generation delete lookup failed.", safeErrorMessage(error, []));
     return { ok: false, error: "The image could not be deleted. Try again." };
@@ -113,9 +130,10 @@ export async function deleteGeneration(
     };
   }
 
-  // g. The history that showed it. A private row's removal changes nothing
+  // g. The surfaces that showed it. A private row's removal changes nothing
   // anyone else can see, so only a public one expires the landing gallery.
   revalidatePath("/generate");
+  revalidatePath("/library");
   if (row.isPublic) {
     updateTag(PUBLIC_GALLERY_TAG);
     revalidatePath("/");
@@ -127,5 +145,5 @@ export async function deleteGeneration(
   //
   // `redirect` signals by throwing, so it sits outside every try above rather
   // than inside one that would swallow it as a failure.
-  redirect("/generate");
+  redirect(destination);
 }
