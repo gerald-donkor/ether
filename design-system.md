@@ -206,6 +206,12 @@ against a pre-change build. It is three native `<select>` elements, each with a
 real `<label>`, for model, size, and image count, followed by one line of plain
 text describing the selected model.
 
+**A generation preserves the selection.** React resets the form natively once a
+Server Action settles, which would otherwise leave the selects showing defaults
+while the page still acted on the previous choice. The controls write their
+values back after that reset, so what is displayed is always what will be sent,
+and the model and size survive a generation instead of snapping back.
+
 Its values are the existing ones: `--surface-2` ground, `--r-pill`, 13px labels
 at the `--text-3` role, 13px control text at the `--text` role, and 16px above
 the row on the 4px spacing scale. Being native controls, they inherit the global

@@ -1,13 +1,13 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef } from "react";
 
 import {
   DEFAULT_MODEL_ID,
   GENERATION_COUNTS,
   IMAGE_MODELS,
   IMAGE_MODEL_IDS,
-  type ImageModel,
+  getModelSize,
   type ImageModelId,
 } from "@/lib/ai/catalog";
 import {
@@ -16,21 +16,27 @@ import {
   SIZE_FIELD,
 } from "@/lib/validation/generation";
 
-/** What the workspace needs in order to reserve the right shape and number of
- * result slots before the response arrives. */
-export type GenerationLayout = {
-  width: number;
-  height: number;
+/** The three chosen values. The workspace owns them, because it needs the size
+ * and count to reserve the right result slots, and because they have to survive
+ * React resetting the form after an action. */
+export type GenerationChoice = {
+  modelId: ImageModelId;
+  sizeKey: string;
   count: number;
 };
 
-const DEFAULT_MODEL = IMAGE_MODELS[DEFAULT_MODEL_ID];
-
-export const DEFAULT_GENERATION_LAYOUT: GenerationLayout = {
-  width: DEFAULT_MODEL.sizes[0].width,
-  height: DEFAULT_MODEL.sizes[0].height,
-  count: 1,
+export const DEFAULT_GENERATION_CHOICE: GenerationChoice = {
+  modelId: DEFAULT_MODEL_ID,
+  sizeKey: IMAGE_MODELS[DEFAULT_MODEL_ID].sizes[0].key,
+  count: Number(GENERATION_COUNTS[0]),
 };
+
+/** The reserved result slot's shape, resolved from the chosen model and size. */
+export function choiceDimensions(choice: GenerationChoice) {
+  const model = IMAGE_MODELS[choice.modelId];
+  const size = getModelSize(model, choice.sizeKey) ?? model.sizes[0];
+  return { width: size.width, height: size.height };
+}
 
 const CONTROL_CLASS =
   "bg-surface-2 rounded-pill text-text max-w-full px-4 py-2 text-[13px]";
@@ -40,33 +46,42 @@ const LABEL_CLASS = "text-text-3 text-[13px] font-medium";
  * The three controls, as native selects with real labels, so each one inherits
  * the global lime focus ring and the platform's own keyboard behaviour.
  *
- * Only the model id is state, because it is the one value that changes what
- * another control offers: each model declares its own sizes. The size select
- * is remounted with `key` when the model changes, so it can never show a size
- * the chosen model does not accept. Size and count are lifted to the workspace
- * through `onLayoutChange`, from event handlers rather than an effect.
+ * All three are controlled from the workspace, which needs the size and count
+ * to reserve the right result slots.
+ *
+ * **The effect below is not optional.** React calls the form element's native
+ * `reset()` after a Server Action settles, in the layout phase of the commit
+ * (`commitLayoutEffectOnFiber` in `react-dom-client`), and native reset reverts
+ * every control to its HTML default. React's own value props are unchanged, so
+ * nothing re-renders and React never learns the DOM moved: the selects would
+ * show defaults while the page still believed the user's choice, which is
+ * exactly the desync this fixes. Passive effects flush after the layout phase,
+ * so this is the first moment the values can be put back, and writing them here
+ * also means a generation no longer discards the model and size that were
+ * picked.
  */
 export function GenerationControls({
-  onLayoutChange,
+  choice,
+  onChange,
 }: {
-  onLayoutChange: (layout: GenerationLayout) => void;
+  choice: GenerationChoice;
+  onChange: (choice: GenerationChoice) => void;
 }) {
   const id = useId();
-  const [modelId, setModelId] = useState<ImageModelId>(DEFAULT_MODEL_ID);
+  const model = IMAGE_MODELS[choice.modelId];
 
-  // Transient values that nothing renders from, so they do not need to cause a
-  // re-render when they change.
-  const sizeKeyRef = useRef(DEFAULT_MODEL.sizes[0].key);
-  const countRef = useRef(DEFAULT_GENERATION_LAYOUT.count);
+  const modelRef = useRef<HTMLSelectElement>(null);
+  const sizeRef = useRef<HTMLSelectElement>(null);
+  const countRef = useRef<HTMLSelectElement>(null);
 
-  const model = IMAGE_MODELS[modelId];
-
-  function report(nextModel: ImageModel, sizeKey: string, count: number) {
-    const size =
-      nextModel.sizes.find((entry) => entry.key === sizeKey) ??
-      nextModel.sizes[0];
-    onLayoutChange({ width: size.width, height: size.height, count });
-  }
+  // No dependency array: this runs after every commit, which is what catches
+  // the one commit that reset the form. Each write is a no-op when the DOM
+  // already agrees.
+  useEffect(() => {
+    if (modelRef.current) modelRef.current.value = choice.modelId;
+    if (sizeRef.current) sizeRef.current.value = choice.sizeKey;
+    if (countRef.current) countRef.current.value = String(choice.count);
+  });
 
   return (
     <div className="mt-4 flex flex-wrap items-end gap-x-5 gap-y-4">
@@ -75,15 +90,20 @@ export function GenerationControls({
           Model
         </label>
         <select
+          ref={modelRef}
           id={`${id}-model`}
           name={MODEL_FIELD}
-          value={modelId}
+          value={choice.modelId}
           onChange={(event) => {
-            const nextId = event.target.value as ImageModelId;
-            const nextModel = IMAGE_MODELS[nextId];
-            setModelId(nextId);
-            sizeKeyRef.current = nextModel.sizes[0].key;
-            report(nextModel, sizeKeyRef.current, countRef.current);
+            const modelId = event.target.value as ImageModelId;
+            // Each model declares its own sizes, so switching model falls back
+            // to that model's first size rather than keeping one it may not
+            // accept.
+            onChange({
+              ...choice,
+              modelId,
+              sizeKey: IMAGE_MODELS[modelId].sizes[0].key,
+            });
           }}
           className={CONTROL_CLASS}
         >
@@ -101,14 +121,13 @@ export function GenerationControls({
           Size
         </label>
         <select
-          key={modelId}
+          ref={sizeRef}
           id={`${id}-size`}
           name={SIZE_FIELD}
-          defaultValue={model.sizes[0].key}
-          onChange={(event) => {
-            sizeKeyRef.current = event.target.value;
-            report(model, sizeKeyRef.current, countRef.current);
-          }}
+          value={choice.sizeKey}
+          onChange={(event) =>
+            onChange({ ...choice, sizeKey: event.target.value })
+          }
           className={CONTROL_CLASS}
         >
           {model.sizes.map((size) => (
@@ -124,13 +143,13 @@ export function GenerationControls({
           Images
         </label>
         <select
+          ref={countRef}
           id={`${id}-count`}
           name={COUNT_FIELD}
-          defaultValue={GENERATION_COUNTS[0]}
-          onChange={(event) => {
-            countRef.current = Number(event.target.value);
-            report(model, sizeKeyRef.current, countRef.current);
-          }}
+          value={String(choice.count)}
+          onChange={(event) =>
+            onChange({ ...choice, count: Number(event.target.value) })
+          }
           className={CONTROL_CLASS}
         >
           {GENERATION_COUNTS.map((count) => (

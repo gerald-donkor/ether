@@ -4,9 +4,10 @@ import { useActionState, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { PromptField } from "@/components/ui/PromptField";
 import {
-  DEFAULT_GENERATION_LAYOUT,
+  choiceDimensions,
+  DEFAULT_GENERATION_CHOICE,
   GenerationControls,
-  type GenerationLayout,
+  type GenerationChoice,
 } from "@/components/app/GenerationControls";
 import {
   generateGeneration,
@@ -27,10 +28,10 @@ function countPhrase(count: number) {
 
 function statusMessage(
   state: GenerationActionState,
-  layout: GenerationLayout,
+  choice: GenerationChoice,
   pending: boolean,
 ) {
-  if (pending) return `Generating ${countPhrase(layout.count)}.`;
+  if (pending) return `Generating ${countPhrase(choice.count)}.`;
   if (state.error) return state.error;
   if (state.ok !== true) return "Your next image will appear here.";
 
@@ -58,8 +59,8 @@ export function GeneratorWorkspace({
     generateGeneration,
     INITIAL_STATE,
   );
-  const [layout, setLayout] = useState<GenerationLayout>(
-    DEFAULT_GENERATION_LAYOUT,
+  const [choice, setChoice] = useState<GenerationChoice>(
+    DEFAULT_GENERATION_CHOICE,
   );
   const announcementRef = useRef<HTMLParagraphElement>(null);
 
@@ -70,8 +71,9 @@ export function GeneratorWorkspace({
   // The slots exist before the response does, at the shape the controls asked
   // for, so the image arrives into a box that was already the right size. Once
   // images exist, each slot takes its own stored dimensions.
+  const chosen = choiceDimensions(choice);
   const results = state.ok === true ? state.generations : [];
-  const slotCount = results.length > 0 ? results.length : layout.count;
+  const slotCount = results.length > 0 ? results.length : choice.count;
   const slots = Array.from(
     { length: slotCount },
     (_, index) => results[index] ?? null,
@@ -97,7 +99,9 @@ export function GeneratorWorkspace({
         <PromptField
           action={formAction}
           describedBy="generation-status"
-          controls={<GenerationControls onLayoutChange={setLayout} />}
+          controls={
+            <GenerationControls choice={choice} onChange={setChoice} />
+          }
           showPublishOption
           className="mt-8 max-w-[760px]"
         />
@@ -114,7 +118,7 @@ export function GeneratorWorkspace({
                   style={{
                     aspectRatio: slot
                       ? `${slot.width} / ${slot.height}`
-                      : `${layout.width} / ${layout.height}`,
+                      : `${chosen.width} / ${chosen.height}`,
                   }}
                 >
                   {slot ? (
@@ -152,7 +156,7 @@ export function GeneratorWorkspace({
               tabIndex={-1}
               className={state.ok === false ? "text-text" : "text-text-2"}
             >
-              {statusMessage(state, layout, pending)}
+              {statusMessage(state, choice, pending)}
             </p>
             {results.length > 0 ? (
               <p className="text-text-3 mt-4 text-[13px] leading-[22px]">

@@ -517,25 +517,50 @@ Run on 2026-08-13.
 
 - **Auth enforcement confirmed in the browser**: `/generate` while signed out
   redirected to `/sign-in?redirect_url=…%2Fgenerate`.
-- **One signed-in end-to-end run through the real form**, at the default model
-  and size with count 1. The stored row, read back with the read-only query:
+- **Signed-in end-to-end runs through the real form**, with every row read back
+  by the read-only query. All stored `.jpg` and `is_public = false`:
 
-  | Column | Value |
-  | --- | --- |
-  | `model` | `@cf/black-forest-labs/flux-1-schnell` |
-  | `width`, `height` | 1024, 1024 |
-  | `right(image_url, 4)` | `.jpg` |
-  | `is_public` | `false`, the checkbox being unchecked |
+  | Run | Stored `model` | Stored `width` x `height` |
+  | --- | --- | --- |
+  | flux, square, 1 | `flux-1-schnell` | 1024 x 1024 |
+  | SDXL, landscape, 1 | `stable-diffusion-xl-lightning` | 1280 x 768 |
+  | SDXL, portrait, 1 | `stable-diffusion-xl-lightning` | 768 x 1280 |
+  | flux, square, **2** | `flux-1-schnell` | 1024 x 1024, **two rows** |
 
-  The new `model`, `size` and `count` fields therefore reach the action, parse,
-  and write a correct row through the real form.
-- **Still unverified:** an SDXL run at a non-square size and a count-of-2 run,
-  both through the UI. The browser tooling could not drive the selects on this
-  page: `read_page` returned an empty tree and `javascript_tool` was blocked by
-  the extension, and this was stopped rather than retried further. The provider
-  side of both is verified above by direct calls, including 1280x768 and
-  768x1280 coming back at exactly those dimensions; what remains unconfirmed is
-  only the select-to-row path for a non-default model and a count above one.
+  Every stored dimension is the one the chosen size asked for, measured off the
+  returned bytes rather than copied from the request. The count-of-2 run wrote
+  two rows, rendered two slots side by side, and announced "2 images generated
+  and saved. They stay private.", which confirms the sequential loop and the
+  partial-success result shape end to end.
+
+### The form reset defect, found and fixed during verification
+
+The count-of-2 run surfaced a real bug in the first version of the controls:
+after the action settled, the three selects displayed their defaults while the
+model note beside them still described the model the user had actually chosen.
+The note was right and the selects were wrong.
+
+**Cause, read out of `react-dom` rather than guessed.** React calls the form
+element's native `reset()` after a Server Action completes, from
+`recursivelyResetForms` inside `commitLayoutEffectOnFiber`
+(`react-dom-client.development.js`). Native `reset()` reverts every control to
+its HTML default, including a **controlled** `<select>`, because it writes the
+DOM directly. React's `value` props did not change, so nothing re-rendered and
+React never learned the DOM had moved. Two consequences: the controls lied about
+what was selected, and every generation silently discarded the model and size
+the user had picked.
+
+**Fix.** All three values live in `GeneratorWorkspace` state, the selects are
+controlled from it, and `GenerationControls` runs a dependency-free `useEffect`
+that writes the chosen values back onto the three select elements. Passive
+effects flush **after** the layout phase, so that effect is the first moment the
+reset can be undone. Writing them back also means a generation now preserves the
+choice instead of resetting it, which is the better behaviour anyway.
+
+An earlier attempt bumped a `key` to remount the controls from an effect, and
+was rejected by `react-hooks/set-state-in-effect`: "Calling setState
+synchronously within an effect can trigger cascading renders." Syncing the DOM
+from state is what an effect is legitimately for; bumping state is not.
 
 ## Verification, prompt 014
 
