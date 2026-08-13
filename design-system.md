@@ -278,6 +278,44 @@ state, provider, secret, or user data and add no motion. Footer destinations use
 real internal links; unverified social accounts remain non-interactive visual
 lockups until verified URLs exist.
 
+### 2.11 The single artefact record
+
+`/g/[id]` is the permalink for one generation, and it is its own layout family:
+the image leads, and everything else is the record beneath it. It is
+deliberately not `/generate`'s form-led column, not a grid, and not another
+image-plus-text split (§6.5).
+
+The column is capped at 880px inside `--container`. A small `Back to your
+images` link sits above a heading at the `clamp(28px,5vw,40px)` role the
+history section already uses, so this page's type is one step quieter than
+`/generate`'s. **The image panel takes the row's own stored width and height as
+its `aspectRatio`**, so the box is the correct shape before the image loads,
+exactly as the result slots on `/generate` do. It uses `--r-panel`, matching
+that result region, and it is not `priority`.
+
+Beneath it, a two-column definition list on a `120px` label column: prompt,
+model, size, created, visibility. Labels take the `--text-3` role at 13px,
+values `--text` at 15px on 26px leading. **One hairline above the list rather
+than one under every row** - the list is five items, and a rule per row would
+read as a spec table. Sizes and dates are real query results; the model line
+falls back to the stored id when the registry does not list it.
+
+A second hairline separates the action row: `Download` and `Delete`, both the
+existing ghost pill. **The destructive control does not become a new colour.**
+Two accents stay locked, so the words carry the weight, and delete is a
+two-step confirm in markup rather than a browser dialog: the first press
+reveals a plain sentence, a `Delete permanently` and a `Cancel`, moves focus to
+the confirm, and returns focus to the opener on cancel. The result is announced
+through a `role="status"` node and reads without colour.
+
+`/generate`'s history cards gain a link wrapper to this route. The card keeps
+its `--r-card` image box and its two-line caption; the only visible change is
+the caption taking the established `--text-2` to `--text` hover transition.
+
+**No new token, radius, colour or z-index level, and no row in §3** - nothing
+on this route animates beyond the existing link hover and the button's
+`active:scale`.
+
 ---
 
 ## 3. Motion
@@ -387,8 +425,9 @@ From `vercel-react-best-practices`:
 ## 7. Backend
 
 Clerk owns identity, Neon stores generation records, Vercel Blob stores the
-generated images, and the Vercel AI Gateway runs the image model. Ether does not
-duplicate Clerk users in Postgres.
+generated images, and Cloudflare Workers AI runs the image model, which
+replaced the Vercel AI Gateway on 2026-08-13. Ether does not duplicate Clerk
+users in Postgres.
 
 Generation ships with an indexed per-owner count over the preceding hour,
 capped at 20 calls. This is a spending floor rather than a distributed limiter;

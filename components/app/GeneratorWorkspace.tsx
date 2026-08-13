@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { PromptField } from "@/components/ui/PromptField";
 import {
   choiceDimensions,
@@ -179,18 +180,23 @@ export function GeneratorWorkspace({
           <ul className="mt-8 grid gap-x-5 gap-y-9 sm:grid-cols-2 lg:grid-cols-3">
             {initialGenerations.map((generation) => (
               <li key={generation.id}>
-                <div className="rounded-card bg-surface relative aspect-square overflow-hidden">
-                  <Image
-                    src={generation.imageUrl}
-                    alt={generation.prompt}
-                    fill
-                    sizes="(max-width: 639px) calc(100vw - 40px), (max-width: 1023px) calc((100vw - 60px) / 2), 347px"
-                    className="object-cover"
-                  />
-                </div>
-                <p className="text-text-2 mt-3 line-clamp-2 text-[13px] leading-[22px]">
-                  {generation.prompt}
-                </p>
+                <Link
+                  href={`/g/${generation.id}`}
+                  className="rounded-card group block"
+                >
+                  <div className="rounded-card bg-surface relative aspect-square overflow-hidden">
+                    <Image
+                      src={generation.imageUrl}
+                      alt={generation.prompt}
+                      fill
+                      sizes="(max-width: 639px) calc(100vw - 40px), (max-width: 1023px) calc((100vw - 60px) / 2), 347px"
+                      className="object-cover"
+                    />
+                  </div>
+                  <p className="text-text-2 group-hover:text-text mt-3 line-clamp-2 text-[13px] leading-[22px] transition-colors">
+                    {generation.prompt}
+                  </p>
+                </Link>
               </li>
             ))}
           </ul>

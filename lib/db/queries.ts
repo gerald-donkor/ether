@@ -99,6 +99,35 @@ export async function getPublicGalleryImages(
   }
 }
 
+/**
+ * One generation, for its owner. Both columns are filtered in the query, so a
+ * valid id belonging to someone else returns nothing rather than returning a
+ * row to a check that was forgotten (AGENTS.md 9 rule 1).
+ */
+export async function getGenerationForOwner(id: string, userId: string) {
+  const [generation] = await getDb()
+    .select()
+    .from(generations)
+    .where(and(eq(generations.id, id), eq(generations.userId, userId)))
+    .limit(1);
+
+  return generation;
+}
+
+/**
+ * Permanent deletion of one row, filtered on the owner again rather than
+ * trusting the read that authorised it. The returned id is what distinguishes
+ * a delete that matched from one that matched nothing.
+ */
+export async function deleteGenerationForOwner(id: string, userId: string) {
+  const [deleted] = await getDb()
+    .delete(generations)
+    .where(and(eq(generations.id, id), eq(generations.userId, userId)))
+    .returning({ id: generations.id });
+
+  return deleted;
+}
+
 export async function createGeneration(input: NewGeneration) {
   const [generation] = await getDb()
     .insert(generations)

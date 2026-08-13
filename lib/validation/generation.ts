@@ -60,3 +60,17 @@ export const COUNT_FIELD = "count";
 /** The checkbox's `name` and `value`, so the form and the schema cannot drift. */
 export const PUBLISH_FIELD = "publish";
 export const PUBLISH_VALUE = "public";
+
+/**
+ * One generation's id, as it arrives from a URL segment or a delete form.
+ *
+ * It is parsed before it reaches a query because `generations.id` is a `uuid`
+ * column: a malformed value raises a Postgres cast error rather than returning
+ * no rows, which would turn every mistyped permalink into a 500. The message
+ * is the same one a row belonging to someone else produces, so neither answer
+ * confirms that an id exists.
+ */
+export const generationIdSchema = z.uuid("That image could not be found.");
+
+/** The delete form's only field, so the form and the parser cannot drift. */
+export const GENERATION_ID_FIELD = "generationId";

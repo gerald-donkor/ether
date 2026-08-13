@@ -84,7 +84,9 @@ Available queries:
 - count all generations for one owner;
 - count one owner's generations since a supplied timestamp;
 - insert one generation and return the stored row;
-- list the newest public generations for the landing gallery.
+- list the newest public generations for the landing gallery;
+- read one generation by id **and** owner;
+- delete one generation by id **and** owner, returning the id it removed.
 
 ### The public gallery read
 
@@ -191,13 +193,97 @@ an ASCII tag passes through `encodeCacheTag` unchanged and therefore matches
 the tag `unstable_cache` stored.
 
 There is no mutation for changing an existing generation's visibility. No
-client-supplied generation id is accepted anywhere in this step. The temporary spending floor allows fewer than 20 generations in
+client-supplied generation id is accepted **on the generate path**; prompt 016
+adds the first action that accepts one, and the rules it validates and
+authorises that id against are below. The temporary spending floor allows fewer than 20 generations in
 the preceding hour. It is not a distributed rate limiter. Step 9 replaces it
 with Upstash and product-level quotas.
 
 Provider, Blob, and database failures become actionable client messages. Server
 logs remove the user's prompt before recording error details. If the Blob write
 succeeds but the database insert fails, the action attempts to delete the Blob.
+
+## The generation permalink and its delete (prompt 016)
+
+`/g/[id]` is one generation's record: the image at its own stored ratio, then
+prompt, model, size, created date and visibility, then a download link and a
+delete control. It is owner-only. Sharing, a publish toggle, and a public view
+of this route are all build step 8.
+
+`app/(app)/g/[id]/page.tsx` awaits `params` (a Promise in Next 16), reads the
+session through `requireUserId()` rather than trusting the proxy, parses the
+segment with `generationIdSchema`, and calls `getGenerationForOwner(id,
+userId)`. A failed parse and a missing row are both `notFound()`. The metadata
+title is the static string `Image | Ether`: the prompt is the user's data and a
+title lands in the tab, the history, and any screenshot.
+
+**Two new queries in `lib/db/queries.ts`**, both filtering on `id` and
+`user_id` together:
+
+- `getGenerationForOwner(id, userId)` returns the row or `undefined`.
+- `deleteGenerationForOwner(id, userId)` deletes and returns `{ id }`, or
+  `undefined` when nothing matched.
+
+**One new storage helper.** `generationDownloadUrl(url)` wraps `getDownloadUrl`
+from `@vercel/blob`, verified on 2026-08-13 at
+`node_modules/@vercel/blob/dist/create-folder-BM6BTlko.d.ts:134` with the
+signature `(blobUrl: string) => string` and re-exported from the package root.
+It exists because Blob is a different origin, where the `download` attribute is
+ignored: the plain url answers `Content-Disposition: inline` and opens the
+image, and the wrapped url answers `attachment` and saves it. Both were
+measured, and the measurement is under the prompt 016 verification below.
+
+### `deleteGeneration`, and why it is ordered the way it is
+
+`app/(app)/g/[id]/actions.ts` follows `AGENTS.md` §10's stages:
+
+1. read the Clerk session; no session is a typed failure;
+2. parse `generationId` from `FormData` with `generationIdSchema`;
+3. **no quota check**, and the omission is commented: deleting spends no
+   provider money and frees storage;
+4. authorise by reading the row through `getGenerationForOwner`;
+5. delete the Blob object;
+6. delete the row, filtering on the owner again rather than trusting stage 4;
+7. `revalidatePath("/generate")`, plus `updateTag(PUBLIC_GALLERY_TAG)` and
+   `revalidatePath("/")` only when the row was public;
+8. `redirect("/generate")`.
+
+**Deletion is permanent: the Blob object and the row both go.** This diverges
+from `AGENTS.md` §9 rule 5, which prefers a soft delete, and from §9.1, which
+schedules a soft-delete state at step 7. The user chose permanence on
+2026-08-13 because a row marked deleted while its image stays fetchable at a
+public Blob url is a broken promise rather than an audit trail. **Step 7's
+soft-delete state is therefore an undo layer over the library, not the delete
+mechanism**, and step 7's prompt has to say so.
+
+**The Blob goes before the row, and the ordering is the privacy argument.** If
+the Blob delete fails, nothing is removed, the user gets a typed failure, and
+the row still renders: a recoverable state. If the Blob delete succeeds and the
+row delete then fails, what is left is a row pointing at a dead url, which is a
+rendering defect. Row-first would invert that into a live public url sitting
+behind a success message, which is a privacy breach. The rendering defect is
+the one worth taking.
+
+**Not found and not yours return the same message**, `That image could not be
+found.`, on the page and in the action. A distinct refusal would confirm that a
+given id exists, which is enough to enumerate other people's generations.
+
+**The redirect is a stated deviation from `AGENTS.md` §10 rule 5.** Rule 5
+forbids redirecting on success because a navigation discards the generate
+form's scroll and motion state. Here the page's entire subject ceases to exist,
+so there is no slot to render a result into and staying is not an option.
+`redirect()` signals by throwing, so it is called after every `try` rather than
+inside one that would swallow it as a failure.
+
+**Logging.** Every `console.error` on this path is a fixed string plus an
+error name and message with the row's prompt **and its Blob url** replaced. The
+url is redacted as well as the prompt because Blob pathnames carry the owner's
+Clerk id, which is the known gap recorded under the public gallery read.
+
+`proxy.ts` gains `/g` in both the route matcher and `config.matcher`, so no
+static marketing route starts paying for auth per request. `/generate`'s
+history cards become links to `/g/<id>`; the card's markup gains a `Link`
+wrapper and a hover colour transition on the caption, and nothing else changes.
 
 ## AI model
 
@@ -407,7 +493,7 @@ images remain user data in Blob and never enter `public/` or Git.
 
 ## Auth and routes
 
-`proxy.ts` optimistically protects `/generate` and `/account`. The app layout,
+`proxy.ts` optimistically protects `/generate`, `/account` and `/g`. The app layout,
 each protected page, and the generation action independently read the server
 session. Proxy is not the authorization boundary.
 
@@ -418,6 +504,7 @@ session. Proxy is not the authorization boundary.
 | `/sign-up` | Public Clerk sign-up screen |
 | `/generate` | Dynamic, owner-scoped history read and Server Action mutation |
 | `/account` | Dynamic Clerk identity read and owner-scoped generation count |
+| `/g/[id]` | Dynamic, owner-scoped single-row read and a delete Server Action. Never prerendered |
 
 Clerk 7 uses `Show when="signed-in"` and `Show when="signed-out"` for auth-state
 rendering. These replace the `SignedIn` and `SignedOut` names in the older
@@ -465,6 +552,101 @@ A generation is private unless its owner opted in when creating it. Publishing
 transmits the image URL and its stored dimensions to anonymous visitors, and
 nothing else the query selects. See the known gap under the public gallery read
 for what the URL itself still carries.
+
+## Verification, prompt 016
+
+Run on 2026-08-13, against the dev server already running on port 3001.
+
+- `npm run lint` produced no output beyond npm's own two notice lines, exit 0.
+- `npm run build` succeeded: `Compiled successfully in 3.9s`, `Finished
+  TypeScript in 3.2s`, 17 static pages generated.
+- **Route table compared, not assumed.** Built, stashed the seven changed
+  source paths, rebuilt, diffed. The only difference is one added line,
+  `├ ƒ /g/[id]`. Every other route kept its render mode, `/` is still `○`
+  static, and `/generate` is still `ƒ`.
+- **`/`'s prerendered HTML compared byte for byte.**
+  `.next/server/app/index.html` is **110,782 bytes both before and after**, the
+  same figure prompt 015 recorded, and the normalised diff printed `IDENTICAL`.
+- **Environment-absent build passed** and `.env.local` was restored.
+- **Client-bundle secret scan:** `BLOB_READ_WRITE_TOKEN` and `DATABASE_URL`
+  each matched **0** files under `.next/static/`. `CLERK_SECRET_KEY` matched
+  one, the known permanent name-only hit; searching for its actual value
+  returned **0**, as did searching for the Blob token's value.
+- **Anonymous access:** `curl` to `/g/<real id>` returned **307** to
+  `/sign-in?redirect_url=…%2Fg%2F…`, and `/` still returned **200**.
+
+### The two-account check could not be run, and here is what was run instead
+
+`AGENTS.md` §8.3 rule 4 wants two accounts verified against the database. A
+read-only `group by user_id` returned **exactly one owner** with 9 rows, so
+there is no second owner's id to request and the real cross-owner test was not
+possible. It is recorded as not run rather than described as passed.
+
+What could be verified was, signed in as that owner:
+
+| Request | Result |
+| --- | --- |
+| `/g/3dff1ad0-…` (own row) | renders the record |
+| `/g/00000000-0000-4000-8000-000000000000` (well-formed, matches no row) | **404** |
+| `/g/not-a-uuid` (malformed) | **404**, not a 500 |
+
+The malformed case is the one the pre-query parse exists for: without it the
+value reaches a `uuid` column and raises a Postgres cast error. The dev server
+log carries no error for either request.
+
+Because this was the first time a cross-owner check was attempted by hand, it
+is **not** added to `docs/automation.md`; §3 captures a step on its second
+occurrence. It stays uncaptured, and step 7 or 8 is where it will be worth
+writing down, ideally after a second account exists.
+
+### Download, measured rather than assumed
+
+| url | status | `content-disposition` |
+| --- | --- | --- |
+| the plain Blob url | 200 | `inline; filename="….jpg"` |
+| `generationDownloadUrl(...)` | 200 | `attachment; filename="….jpg"` |
+
+`attachment` is what makes the browser save rather than open, and it is why the
+link cannot rely on the `download` attribute across origins. Clicking the link
+in the browser left the page in place rather than navigating to the image, but
+**no saved file appeared in the download directory**, and page-initiated
+downloads appear to be suppressed in the automated browser session. The header
+measurement above is the evidence; the click is not claimed as a completed
+save.
+
+### One deletion, end to end
+
+The private row `3dff1ad0-…` (SDXL Lightning, 1280 x 768) was deleted through
+the real control.
+
+- The first click revealed the confirm sentence plus `Delete permanently` and
+  `Cancel`, with focus on the confirm. `Cancel` collapsed the pair and returned
+  focus to `Delete`.
+- Confirming redirected to `/generate`.
+- Read-only re-query: **0 rows** match the deleted id, and the table went from
+  9 rows to **8**. The public row count is **1**, unchanged.
+- `HEAD` on the deleted Blob url: **200 before, 404 after**.
+- `/g/3dff1ad0-…` now returns **404**.
+- `/generate` lists **8** history cards, each an `<a href="/g/<uuid>">`, and
+  the deleted one is gone, so the `revalidatePath("/generate")` landed.
+- The row was private, so the `row.isPublic` branch did not run. `/` still
+  serves the same single public generation in its gallery. Note that this is
+  the guarded branch plus an unchanged public row, not a direct observation of
+  the cache; there is no way to watch `unstable_cache` expire from outside.
+- The server log carries no prompt, no owner id and no Blob url from this
+  action, because no failure path ran.
+
+### Two warnings worth recording, neither introduced here
+
+- Clerk logs `"createRouteMatcher" is deprecated and will be removed in the
+  next major release`, recommending resource-based checks in each page and
+  action. This project already does those checks; the proxy matcher is the
+  optimistic layer on top. Migrating off `createRouteMatcher` is a separate
+  decision, not part of this step.
+- Next flags the `/g/[id]` image as the LCP element and suggests
+  `loading="eager"`. It is deliberately not set: `design-system.md` §5.3 makes
+  the macaw the only priority image on the site, and this route is owner-only
+  and behind a navigation.
 
 ## Verification, prompt 015
 
