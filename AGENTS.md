@@ -313,8 +313,11 @@ Those belong to build steps 2 and 3.
 (`.vercel/project.json`), and their variables are present in the gitignored
 `.env.local`: Neon (`DATABASE_URL`, `DATABASE_URL_UNPOOLED`), Vercel Blob
 (`BLOB_READ_WRITE_TOKEN`), Clerk (`CLERK_SECRET_KEY`,
-`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`) and the AI Gateway (`VERCEL_OIDC_TOKEN`).
-The integration packages are installed and wired by Prompt 009. Read current
+`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`). The model provider is **Cloudflare
+Workers AI**, which is not a Vercel integration and is not provisioned by
+`vercel integration`: its `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` are
+set by hand (§5.3 rule 1, prompt 014). The integration packages are installed
+and wired by Prompt 009. Read current
 provisioning state from `vercel env ls` and `vercel integration list`, never
 from this paragraph (§12 rule 5).
 
@@ -403,15 +406,23 @@ everything around it.
 
 ### The hard rules
 
-1. **Every model call runs through the Vercel AI Gateway with a plain
-   `"provider/model"` string and the `ai` package.** The project's
-   Vercel-managed OIDC token is the authentication, so **no provider API key
-   exists and none is added**. A direct provider SDK (`@ai-sdk/openai`,
-   `openai`, `replicate`, …) is out of bounds.
-2. **The model id is verified against the gateway's live model list before it is
-   hardcoded**, never taken from memory, and it lives as a single exported
+1. **Every model call runs through Cloudflare Workers AI, over its REST API with
+   a plain `fetch`, from exactly one module in `lib/ai/`.** There is one model
+   provider and one place that reaches it; nothing else in the codebase calls a
+   model. Authentication is `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`,
+   read inside the function and never at module scope. No AI SDK provider
+   package (`@ai-sdk/openai`, `openai`, `replicate`, …) is installed for this.
+
+   **This replaced the Vercel AI Gateway on 2026-08-13, at the user's explicit
+   request** (§1 rule 1), because the Gateway refuses every request from a team
+   with no payment method on file, which made the product unbuildable. Prompt
+   014 is the record. The `ai` package stays in `package.json` and the Gateway
+   becomes viable again the moment a card is added; reopening that is a
+   decision, not a cleanup.
+2. **The model id is verified against the provider's live model page before it
+   is hardcoded**, never taken from memory, and it lives as a single exported
    constant in `lib/ai/` with a comment saying why it was chosen, so changing it
-   later is one edit. The chosen id, its price and the date it was verified go
+   later is one edit. The chosen id, its cost and the date it was verified go
    in `docs/backend.md`, not here — model ids and prices move fast enough that
    anything written in this file would go stale (§12 rule 7).
 3. **The model never writes site copy, and never produces a number the site
@@ -533,7 +544,7 @@ beyond that** — read it from `vercel env ls` and `vercel integration list`
 | relational data | **Neon Postgres**, via the Marketplace | `@neondatabase/serverless` + **Drizzle** as the ORM | Drizzle owns schema and migrations exclusively |
 | identity | **Clerk**, via the Marketplace | `@clerk/nextjs` | resource `clerk-byzantine-curtain`; needed a browser terms acceptance and an explicit `integration resource connect` |
 | image storage | **Vercel Blob**, store `ether-images` | `@vercel/blob` | public access, because these are rendered in an `<img>` on a page the user already loaded |
-| the model | **Vercel AI Gateway** | `ai` | authenticated by `VERCEL_OIDC_TOKEN`; no provider key exists |
+| the model | **Cloudflare Workers AI** | none — REST over `fetch` | authenticated by `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`. Chosen because its free daily neuron allocation refuses rather than bills, so no card is required. Replaced the AI Gateway on 2026-08-13 (§5.3 rule 1) |
 | rate limiting | **Upstash Redis** — *not provisioned* | `@upstash/redis` + `@upstash/ratelimit` | step 9. Step 1 ships an indexed `count(*)` floor instead and says so in a comment |
 
 `@vercel/postgres` and `@vercel/kv` **no longer exist** as first-party products.
@@ -598,12 +609,23 @@ away from being hit.
 - `addRandomSuffix: false` with a `crypto.randomUUID()` in the key, so the path
   is unguessable without being unpredictable to us.
 
-**The AI Gateway**
+**Cloudflare Workers AI**
 
-- **Verify the model id against the live model list.** A model name from memory
-  is the exact failure §12 rule 2 exists to prevent.
-- The image API is `experimental_` prefixed in `ai` and the name has moved
-  before. **Check the installed package's types**, not a tutorial.
+- **Verify the model id against its live model page.** A model name from memory
+  is the exact failure §12 rule 2 exists to prevent, and Workers AI ids carry a
+  `@cf/` prefix that is easy to reconstruct wrongly.
+- **A model failure arrives inside an HTTP 200.** The envelope is `success`,
+  `errors`, `messages`, `result`; checking `response.ok` alone hands an
+  undefined image to the decoder. Both conditions are failures.
+- **The image comes back base64 in JSON, not as raw bytes.** It is decoded
+  before anything touches it.
+- **The image model takes no `width` or `height`.** `prompt`, `seed` and
+  `steps` are the documented inputs, so the output size is *measured* off the
+  returned bytes and never assumed — and so is the encoding, because the media
+  type decides the stored blob's extension.
+- The API token needs both `Workers AI - Read` and `Workers AI - Edit`.
+- **The daily neuron allocation is account-wide**, and it is a second ceiling
+  the per-user cap in the generate action does not model.
 
 ## 7.4 Adding a provider
 
@@ -723,7 +745,8 @@ the two Clerk publishable names:
 | `DATABASE_URL` / `DATABASE_URL_UNPOOLED` | 1 | Neon, auto-provisioned |
 | `BLOB_READ_WRITE_TOKEN` | 1 | Vercel Blob, auto-provisioned |
 | `CLERK_SECRET_KEY` / `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | 1 | Clerk, auto-provisioned |
-| `VERCEL_OIDC_TOKEN` | 1 | Vercel, for the AI Gateway |
+| `VERCEL_OIDC_TOKEN` | 1 | Vercel. No longer read for generation after prompt 014 |
+| `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN` | prompt 014 | **ours, set by hand** in `.env.local` and in the Vercel project. The names are this project's choice; the REST API dictates neither (§12 rule 6) |
 | `NEXT_PUBLIC_CLERK_SIGN_IN_URL` / `..._SIGN_UP_URL` | 1 | **ours, set by hand** in `.env.local` and in the Vercel project |
 | Upstash's REST url and token | 9 | read the names back from `vercel env ls` after provisioning — **do not predict them** |
 

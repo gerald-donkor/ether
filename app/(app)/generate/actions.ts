@@ -2,7 +2,10 @@
 
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath, updateTag } from "next/cache";
-import { generateImageForPrompt } from "@/lib/ai/generate";
+import {
+  generateImageForPrompt,
+  ImageGenerationError,
+} from "@/lib/ai/generate";
 import { IMAGE_MODEL } from "@/lib/ai/model";
 import {
   countRecentGenerationsForUser,
@@ -92,9 +95,18 @@ export async function generateGeneration(
     generated = await generateImageForPrompt(prompt);
   } catch (error) {
     console.error("Image generation failed.", safeErrorMessage(error, prompt));
+
+    // Telling someone to revise a prompt that was never the problem sends them
+    // somewhere useless, so an unreachable or exhausted provider says so.
+    const providerUnavailable =
+      error instanceof ImageGenerationError &&
+      error.kind === "provider_unavailable";
+
     return {
       ok: false,
-      error: "The image could not be generated. Revise the prompt or try again.",
+      error: providerUnavailable
+        ? "The generator is unavailable right now. Try again later."
+        : "The image could not be generated. Revise the prompt or try again.",
       generation: null,
     };
   }

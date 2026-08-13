@@ -13,7 +13,8 @@ no separate API server and no app-owned Route Handler in this step.
 | ORM | `drizzle-orm` | 0.45.2 |
 | Migrations | `drizzle-kit` | 0.31.10 |
 | Blob storage | `@vercel/blob` | 2.8.0 |
-| AI Gateway | `ai` | 7.0.64 |
+| Image model | Cloudflare Workers AI REST, called with `fetch` | no package |
+| ~~AI Gateway~~ | `ai` | 7.0.64, installed but no longer imported anywhere |
 | Validation | `zod` | 4.4.3 |
 | Script environment loading | `dotenv-cli` | 11.0.0 |
 
@@ -32,7 +33,7 @@ Drizzle owns the schema in `lib/db/schema.ts`. The committed migration is
 | `user_id` | `text` | Not null, Clerk user id |
 | `prompt` | `text` | Not null, the user's trimmed prompt |
 | `image_url` | `text` | Not null, public Vercel Blob URL |
-| `model` | `text` | Not null, AI Gateway model id |
+| `model` | `text` | Not null, the provider's model id. Holds `@cf/black-forest-labs/flux-1-schnell` from 2026-08-13; no migration was needed for the change |
 | `width` | `integer` | Not null, decoded from the returned image |
 | `height` | `integer` | Not null, decoded from the returned image |
 | `is_public` | `boolean` | Not null, defaults to `false`. The owner's publication choice |
@@ -125,7 +126,7 @@ is two `FormData` fields, `prompt` and `publish`. The action:
 2. validates the prompt and the publication choice together through the shared
    Zod schema;
 3. checks the owner's indexed one-hour generation count;
-4. calls the AI Gateway;
+4. calls Cloudflare Workers AI;
 5. writes the returned bytes to public Blob storage;
 6. writes the generation row, including the validated publication boolean;
 7. revalidates `/generate`;
@@ -172,25 +173,106 @@ succeeds but the database insert fails, the action attempts to delete the Blob.
 ## AI model
 
 `lib/ai/model.ts` exports one model id:
-`google/imagen-4.0-fast-generate-001`.
+`@cf/black-forest-labs/flux-1-schnell`, served by **Cloudflare Workers AI**.
 
-It was verified against the live Vercel AI Gateway catalog on 2026-08-12. The
-catalog described it as the speed-optimized Imagen 4 tier and listed a price of
-$0.02 per image. That speed and cost profile fits an interactive prompt loop.
-AI SDK 7 exposes the stable `generateImage` export, even though the current
-Vercel model page still shows the older `experimental_generateImage` alias.
+### Why the provider changed, on 2026-08-13
 
-The action requests a 1:1 aspect ratio. Width and height are read from the
-returned PNG or JPEG bytes rather than assumed.
+Prompt 009 built the generation path on the Vercel AI Gateway with
+`google/imagen-4.0-fast-generate-001`. It never served a request. The linked
+team `dgsloxx417s-projects` has no payment method, and the Gateway refuses every
+request from such a team:
 
-### Live verification status
+```
+Image generation failed. GatewayInternalServerError: AI Gateway requires a valid
+credit card on file to service requests.
+```
 
-A direct Gateway request reached Vercel with the provisioned OIDC credentials
-on 2026-08-12, but Vercel returned HTTP 403 with
-`customer_verification_required`. The linked Vercel team must add a valid
-credit card before Gateway image requests can complete. Until then, Ether
-returns the action's handled generation-failure message and does not write a
-Blob or database row.
+Prompt 014 moved the call to Cloudflare Workers AI at the user's explicit
+request. **The deciding property is that Workers AI's free tier refuses rather
+than bills.** Quoted from the pricing page: *"If you exceed any one of the above
+limits, further operations will fail with an error."* The allocation is *"10,000
+Neurons per day at no charge"*. Hugging Face Inference Providers was read and
+rejected: a free account receives $0.10 per month, which is a handful of images.
+
+`AGENTS.md` §5.3 rule 1 and the §7.2 provider table were rewritten in the same
+change rather than left stale. The `ai` package stays installed and `lib/ai/`
+is now its only former caller, so the Gateway is one edit away if a card is
+ever added.
+
+### The verified provider facts
+
+All fetched live on 2026-08-13, from Cloudflare's own documentation, and
+re-fetched at execution time rather than carried over from the prompt file.
+
+| Fact | Value | Source page |
+| --- | --- | --- |
+| Endpoint | `POST https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/ai/run/{MODEL}` | `workers-ai/get-started/rest-api/` |
+| Auth header | `Authorization: Bearer {API_TOKEN}` | same |
+| Token permissions | both `Workers AI - Read` and `Workers AI - Edit` | same |
+| Response envelope | `success`, `errors`, `messages`, `result` | same |
+| Model id | `@cf/black-forest-labs/flux-1-schnell` | `workers-ai/models/flux-1-schnell/` |
+| Inputs | `prompt` (required, 1 to 2048 chars), `seed` (optional), `steps` (default 4, max 8) | same |
+| Output | `result.image`, a base64 string. **No `width` or `height` input exists** | same |
+| Free allocation | 10,000 neurons per day, and exceeding it errors rather than bills | `workers-ai/platform/pricing/` |
+| Neuron cost | 4.80 per 512x512 tile, plus 9.60 per step | same |
+
+### How `lib/ai/generate.ts` calls it
+
+The module keeps `import "server-only"` and its
+`{ bytes, mediaType, width, height }` return shape, so the action's
+destructuring is unchanged. It sends `{ prompt, steps: 4 }` and nothing else.
+
+`CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` are read **inside** the
+function, never at module scope, for the same reason `getDb()` is lazy: Next
+evaluates top-level module code during `next build`, so a module-scope read
+would fail the build with the environment absent.
+
+Three things about this provider are easy to get wrong and are handled
+explicitly:
+
+1. **A model failure arrives inside an HTTP 200** carrying `success: false`.
+   Checking `response.ok` alone would pass an undefined image to the decoder.
+   Both a non-2xx status and a `success: false` body are treated as failures.
+2. **The image is base64 in JSON**, not raw bytes as the Gateway returned.
+3. **The output size and encoding are not stated anywhere in the docs**, so both
+   are measured. `readImage` tries the PNG signature, then the JPEG SOF marker,
+   and returns the media type alongside the dimensions. The media type is what
+   `lib/storage/generations.ts` turns into the stored file's extension, so
+   hardcoding `image/jpeg` would risk writing PNG bytes to a `.jpg` path.
+
+### Two failure kinds, because one message was lying
+
+`generateImageForPrompt` throws a typed `ImageGenerationError` carrying a
+`kind`, and the action branches on it. The action never string-matches a
+provider message.
+
+| `kind` | Raised when | Message the user sees |
+| --- | --- | --- |
+| `provider_unavailable` | env vars unset, network failure, non-2xx other than 400, unreadable body, missing image, undecodable bytes | "The generator is unavailable right now. Try again later." |
+| `generation_rejected` | HTTP 400, or a 200 carrying `success: false` | "The image could not be generated. Revise the prompt or try again." |
+
+The old code returned the second message for every failure, including the
+billing refusal above, which sent users to revise a prompt that was never the
+problem. That violated §8.2 rule 4's requirement that a failure be an honest
+visible state.
+
+Thrown messages carry Cloudflare's numeric error codes and messages, never the
+user's prompt, and `safeErrorMessage` in the action strips the prompt from any
+provider string before it reaches a log.
+
+### Measured output size and cost
+
+**Not yet measured.** No live generation has run, because
+`CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` have no values yet. The
+dimensions the model returns, the per-image neuron cost computed from them with
+the published formula, and the resulting images-per-day ceiling are recorded
+here after the first successful generation, read out of the `generations` row
+rather than assumed. No images-per-day figure goes into any user-visible
+string.
+
+The account-wide neuron allocation is a **second ceiling** that the per-user
+20-per-hour count in `actions.ts` does not model. Step 9 owns quotas and does
+not currently account for it.
 
 ## Storage
 
@@ -232,7 +314,16 @@ across production, preview, and development:
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Yes | Clerk browser initialization |
 | `NEXT_PUBLIC_CLERK_SIGN_IN_URL` | Yes | Local sign-in route |
 | `NEXT_PUBLIC_CLERK_SIGN_UP_URL` | Yes | Local sign-up route |
-| `VERCEL_OIDC_TOKEN` | No | AI Gateway authentication, managed by Vercel |
+| `VERCEL_OIDC_TOKEN` | No | Managed by Vercel. No longer read for generation |
+
+Set by hand, not provisioned. Cloudflare is not a Vercel Marketplace
+integration, so neither name comes from a provider and both are this project's
+choice:
+
+| Variable | Browser-visible | Purpose |
+| --- | --- | --- |
+| `CLOUDFLARE_ACCOUNT_ID` | No | Path segment of the Workers AI run endpoint |
+| `CLOUDFLARE_API_TOKEN` | No | Bearer token, needs `Workers AI - Read` and `Workers AI - Edit` |
 
 The Neon marketplace also provisions compatibility variables. Ether does not
 read those aliases. Real values stay in the ignored `.env.local` file and the
@@ -250,6 +341,43 @@ A generation is private unless its owner opted in when creating it. Publishing
 transmits the image URL and its stored dimensions to anonymous visitors, and
 nothing else the query selects. See the known gap under the public gallery read
 for what the URL itself still carries.
+
+## Verification, prompt 014
+
+Run on 2026-08-13.
+
+- `npm run lint` produced no output beyond npm's own two notice lines.
+- `npm run build` succeeded, TypeScript included: `Compiled successfully in
+  6.7s`, `Finished TypeScript in 3.2s`, 17 static pages generated.
+- **Route table compared, not assumed.** The pre-change tree was built by
+  stashing only the three modified source files, and the two route tables were
+  diffed. They are identical: `/` static, `/account` dynamic, `/generate`
+  dynamic, the two Clerk catch-alls dynamic, and the eleven other marketing
+  routes static.
+- `npm run build` with `.env.local` moved aside succeeded and produced the same
+  17 routes, which is what proves the environment read is lazy. `.env.local`
+  was restored immediately afterwards and re-verified present.
+- The built client output was searched for `CLOUDFLARE_ACCOUNT_ID`,
+  `CLOUDFLARE_API_TOKEN`, `api.cloudflare.com`, and the model id. Zero client
+  files matched any of them; both variable names appear only under
+  `.next/server/`. One client chunk does contain the bare string `CLOUDFLARE`,
+  and it was inspected: it is Clerk's runtime sniffing,
+  `fy("Cloudflare-Workers")?"CLOUDFLARE":…`, which predates this change and is
+  unrelated.
+
+Not verified, and why:
+
+- **A live generation.** `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`
+  have no values yet, so no request has reached Cloudflare. Nothing here
+  confirms the endpoint responds, the base64 decodes, the dimensions are real,
+  or the row is written. The response handling above is built from the
+  documentation cited, and the measured output size is explicitly recorded as
+  outstanding.
+- **The invalid-token path returning the new unavailable wording.** Same
+  reason. With both variables unset, that path is reached through the
+  missing-variable branch rather than through a 401, which is not the same test.
+- **`.env.local` was not edited.** The two keys are absent from it and were
+  added by hand by the user rather than by this change.
 
 ## Verification, prompt 013
 
