@@ -3,33 +3,25 @@
 import { useEffect, useId, useRef } from "react";
 
 import {
-  DEFAULT_MODEL_ID,
   GENERATION_COUNTS,
   IMAGE_MODELS,
   IMAGE_MODEL_IDS,
   getModelSize,
   type ImageModelId,
 } from "@/lib/ai/catalog";
+import type { GenerationChoice } from "@/lib/generations/choice";
 import {
   COUNT_FIELD,
   MODEL_FIELD,
   SIZE_FIELD,
 } from "@/lib/validation/generation";
 
-/** The three chosen values. The workspace owns them, because it needs the size
- * and count to reserve the right result slots, and because they have to survive
- * React resetting the form after an action. */
-export type GenerationChoice = {
-  modelId: ImageModelId;
-  sizeKey: string;
-  count: number;
-};
-
-export const DEFAULT_GENERATION_CHOICE: GenerationChoice = {
-  modelId: DEFAULT_MODEL_ID,
-  sizeKey: IMAGE_MODELS[DEFAULT_MODEL_ID].sizes[0].key,
-  count: Number(GENERATION_COUNTS[0]),
-};
+/**
+ * `GenerationChoice` and its fallback moved to `lib/generations/choice.ts` when
+ * `/account` gained stored defaults: the server has to resolve a stored row
+ * against the catalog before this renders, and a client module is the wrong
+ * place for a value the server needs. The controls are unchanged.
+ */
 
 /** The reserved result slot's shape, resolved from the chosen model and size. */
 export function choiceDimensions(choice: GenerationChoice) {

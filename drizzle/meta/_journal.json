@@ -43,6 +43,13 @@
       "when": 1786655124261,
       "tag": "0005_lowly_bill_hollister",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786660200546,
+      "tag": "0006_careful_sphinx",
+      "breakpoints": true
     }
   ]
 }

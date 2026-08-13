@@ -1,10 +1,14 @@
 import { UserButton } from "@clerk/nextjs";
 import { currentUser } from "@clerk/nextjs/server";
+import { DeleteAccountForm } from "@/components/app/DeleteAccountForm";
+import { GenerationDefaultsForm } from "@/components/app/GenerationDefaultsForm";
 import { Container } from "@/components/ui/Container";
 import { requireUserId } from "@/lib/auth";
 import { PROVIDER_UNITS_PER_NEURON } from "@/lib/ai/catalog";
+import { getPreferencesForOwner } from "@/lib/db/account";
 import { readOwnerUsageSummary } from "@/lib/db/quotas";
 import { countGenerationsForUser } from "@/lib/db/queries";
+import { resolveGenerationChoice } from "@/lib/generations/choice";
 
 function formatResetTime(date: Date) {
   return new Intl.DateTimeFormat("en", {
@@ -27,11 +31,22 @@ function formatImageCount(count: number) {
 
 export default async function AccountPage() {
   const userId = await requireUserId();
-  const [user, generationCount, usage] = await Promise.all([
+  const [user, generationCount, usage, preferences] = await Promise.all([
     currentUser(),
     countGenerationsForUser(userId),
     readOwnerUsageSummary(userId),
+    getPreferencesForOwner(userId),
   ]);
+
+  const initialChoice = resolveGenerationChoice(
+    preferences
+      ? {
+          model: preferences.defaultModel,
+          size: preferences.defaultSize,
+          count: preferences.defaultCount,
+        }
+      : null,
+  );
 
   const email =
     user?.emailAddresses.find(
@@ -145,6 +160,51 @@ export default async function AccountPage() {
               Usage unavailable
             </p>
           )}
+        </section>
+
+        <section
+          aria-labelledby="defaults-title"
+          className="border-line mt-12 border-t pt-8"
+        >
+          <h2
+            id="defaults-title"
+            className="text-text text-[22px] leading-[30px]"
+          >
+            Generation defaults
+          </h2>
+          <p className="text-text-2 mt-3 max-w-[62ch] text-[15px] leading-[26px]">
+            What the generator starts from. You can change any of it on every
+            generation, and publishing is always confirmed there.
+          </p>
+          <GenerationDefaultsForm
+            initialChoice={initialChoice}
+            initialPublish={preferences?.defaultVisibility === "public"}
+          />
+        </section>
+
+        <section
+          aria-labelledby="data-title"
+          className="border-line mt-12 border-t pt-8"
+        >
+          <h2 id="data-title" className="text-text text-[22px] leading-[30px]">
+            Your data
+          </h2>
+          <p className="text-text-2 mt-3 max-w-[62ch] text-[15px] leading-[26px]">
+            Export gives you a JSON file with your prompts, image links, usage
+            records and defaults. Deleting removes all of it, along with the
+            images themselves.
+          </p>
+
+          <p className="mt-6">
+            <a
+              href="/account/export"
+              className="border-line text-text hover:border-text-3 rounded-pill inline-flex items-center justify-center border px-5 py-2.5 text-[14px] font-medium whitespace-nowrap transition-transform duration-200 ease-(--ease-out) active:scale-[0.98]"
+            >
+              Export my data
+            </a>
+          </p>
+
+          <DeleteAccountForm />
         </section>
       </section>
     </Container>

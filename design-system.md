@@ -271,6 +271,32 @@ UTC day. A failed usage read says `Usage unavailable` and never substitutes a
 zero. Global provider capacity is absent. There is no card, icon, progress bar,
 new token, radius, colour, interaction, or motion.
 
+**`/account` then adds two more groups**, each opened by the same single
+`--line` hairline at `mt-12 pt-8` the usage group uses, with the same 22px
+heading, 12px uppercase label and 15px/26px explanatory roles. Neither adds a
+token, a radius, a colour, a z-index level, or a row to §3, and nothing here
+animates.
+
+`Generation defaults` renders the generator's own control row unchanged, so the
+account form and the generate form can never offer different options, followed
+by the same publication checkbox pattern and one lime `Save defaults` pill. Both
+the selects and the checkbox write their values back after React's native form
+reset, for the reason recorded above. The stored default seeds `/generate` only:
+publishing is still confirmed on every generation, and the copy says so.
+
+`Your data` carries a ghost pill linking to `/account/export`, which is a plain
+same-origin navigation and needs no client-side download machinery, and the
+delete control. **The destructive control does not become a new colour** (§6.2,
+and the two-accent invariant): it is the same hairline ghost pill
+`DeleteGenerationButton` uses, and the words carry the weight. It is a two-step
+confirm in markup and never a browser dialog. The first press reveals a plain
+sentence stating what goes and that it cannot be undone, a text field that must
+be typed, a confirm and a `Cancel`; focus moves to the field on reveal and
+returns to the opener on cancel. Each group's outcome is announced through a
+mounted, focusable `role="status"` region that reads at full contrast without
+relying on colour, and it is mounted from first paint so it reserves its own
+space.
+
 ### 2.9 Marketing information routes
 
 `/learn`, `/build`, `/product`, and `/community` extend the marketing shell as

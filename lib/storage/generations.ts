@@ -27,6 +27,32 @@ export async function deleteGenerationImage(url: string) {
   await del(url);
 }
 
+/**
+ * How many urls go into one `del()` call. `del` is typed
+ * `(urlOrPathname: string[] | string, options?)` and **states no maximum array
+ * length**, so this is a chosen bound rather than a documented one: it keeps a
+ * single request's body small and predictable on an account with a long
+ * history, and it keeps one failure from being a failure of every url at once.
+ */
+const DELETE_CHUNK_SIZE = 100;
+
+/**
+ * Delete many objects, in order, in chunks. It throws on the first failing
+ * chunk rather than continuing, because the only caller deletes an account and
+ * must abort before any row is removed: a deleted row whose image is still live
+ * at a public url would be a broken promise behind a success message.
+ *
+ * Earlier chunks that already succeeded are not restorable, which is the
+ * accepted cost of deleting bytes at all. The caller reports a true partial
+ * outcome rather than a success.
+ */
+export async function deleteGenerationImages(urls: readonly string[]) {
+  for (let index = 0; index < urls.length; index += DELETE_CHUNK_SIZE) {
+    const chunk = urls.slice(index, index + DELETE_CHUNK_SIZE);
+    if (chunk.length > 0) await del([...chunk]);
+  }
+}
+
 const MAX_MODERATION_IMAGE_BYTES = 10 * 1024 * 1024;
 
 export async function readGenerationImageForModeration(

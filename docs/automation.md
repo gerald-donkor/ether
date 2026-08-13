@@ -179,6 +179,13 @@ or change another owner's row.
 6. Clean up every synthetic row and temporary Blob in `finally`, then run an
    aggregate query proving no synthetic rows remain.
 
+**When the check asserts a Blob object is gone, poll rather than fetch once.**
+A `del()` that has returned can still be served as `200` for several seconds,
+and a single immediate fetch reports a false failure. Measured on 2026-08-13:
+`200` at +0ms, +1s, +2s and +4s, then `404` at +8s, while an isolated delete of
+the same kind answered `404` immediately. The delay is variable, so back off
+across roughly 15 seconds and break on the first `404`.
+
 Run the module with the existing environment discipline:
 
 ```bash

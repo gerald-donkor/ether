@@ -23,6 +23,25 @@ import type { GenerationVisibility } from "@/lib/generations/visibility";
  * is the literal below and an absent field means private. Truthiness is never
  * consulted: an unexpected value is rejected rather than read as consent.
  */
+/**
+ * The model and the size are only ever valid as a pair: each model declares its
+ * own sizes, and the default model takes no dimensions at all. Two schemas
+ * enforce this now, the generate request and the account defaults, so the rule
+ * is written here once and applied twice. The message names the control rather
+ * than the internals.
+ */
+export function refineModelSizePair(
+  value: { model: string; size: string },
+  ctx: z.RefinementCtx,
+) {
+  const model = getModel(value.model);
+  if (!model) return;
+
+  if (!getModelSize(model, value.size)) {
+    ctx.addIssue("That image size is not available for the chosen model.");
+  }
+}
+
 export const generationRequestSchema = z
   .object({
     prompt: z
@@ -42,17 +61,7 @@ export const generationRequestSchema = z
         value === "public" ? "public" : "private",
       ),
   })
-  // The model and the size are only ever valid as a pair: each model declares
-  // its own sizes, and the default model takes no dimensions at all. The
-  // message names the control rather than the internals.
-  .superRefine((value, ctx) => {
-    const model = getModel(value.model);
-    if (!model) return;
-
-    if (!getModelSize(model, value.size)) {
-      ctx.addIssue("That image size is not available for the chosen model.");
-    }
-  });
+  .superRefine(refineModelSizePair);
 
 /** The field names, so the form and the schema cannot drift. */
 export const PROMPT_FIELD = "prompt";

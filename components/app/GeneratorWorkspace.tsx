@@ -6,10 +6,12 @@ import Link from "next/link";
 import { PromptField } from "@/components/ui/PromptField";
 import {
   choiceDimensions,
-  DEFAULT_GENERATION_CHOICE,
   GenerationControls,
-  type GenerationChoice,
 } from "@/components/app/GenerationControls";
+import {
+  DEFAULT_GENERATION_CHOICE,
+  type GenerationChoice,
+} from "@/lib/generations/choice";
 import {
   generateGeneration,
   type GenerationActionState,
@@ -53,16 +55,23 @@ function statusMessage(
 
 export function GeneratorWorkspace({
   initialGenerations,
+  initialChoice = DEFAULT_GENERATION_CHOICE,
+  initialPublish = false,
 }: {
   initialGenerations: GenerationResult[];
+  /**
+   * The owner's saved defaults, already resolved against the catalog by the
+   * page. They seed the controls and nothing else: the action still parses the
+   * submitted form and still reads publication from the submitted checkbox.
+   */
+  initialChoice?: GenerationChoice;
+  initialPublish?: boolean;
 }) {
   const [state, formAction, pending] = useActionState(
     generateGeneration,
     INITIAL_STATE,
   );
-  const [choice, setChoice] = useState<GenerationChoice>(
-    DEFAULT_GENERATION_CHOICE,
-  );
+  const [choice, setChoice] = useState<GenerationChoice>(initialChoice);
   const announcementRef = useRef<HTMLParagraphElement>(null);
 
   useEffect(() => {
@@ -104,6 +113,7 @@ export function GeneratorWorkspace({
             <GenerationControls choice={choice} onChange={setChoice} />
           }
           showPublishOption
+          publishDefaultChecked={initialPublish}
           className="mt-8 max-w-[760px]"
         />
 

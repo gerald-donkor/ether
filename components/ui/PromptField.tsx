@@ -33,6 +33,7 @@ export function PromptField({
   describedBy,
   controls,
   showPublishOption = false,
+  publishDefaultChecked = false,
   className = "mt-7",
 }: {
   action?: (formData: FormData) => void | Promise<void>;
@@ -45,6 +46,13 @@ export function PromptField({
   controls?: ReactNode;
   /** Real generate form only. The landing page's copy of this field is inert. */
   showPublishOption?: boolean;
+  /**
+   * The checkbox's starting state, from the owner's saved default. It is
+   * uncontrolled, so this is the initial state and the HTML default the native
+   * form reset returns to. Off unless the owner saved otherwise, and it is
+   * never consent by itself: the server reads the submitted field.
+   */
+  publishDefaultChecked?: boolean;
   className?: string;
 }) {
   const id = useId();
@@ -80,7 +88,8 @@ export function PromptField({
 
       {controls ?? null}
 
-      {/* Publication is explicit and off by default. The name and value are
+      {/* Publication is explicit, and off unless the owner saved a different
+          default on /account. The name and value are
           the closed pair `lib/validation/generation.ts` accepts; they are
           written literally here so the marketing bundle does not pull in the
           schema module and its validator. */}
@@ -91,6 +100,7 @@ export function PromptField({
             name="publish"
             value="public"
             type="checkbox"
+            defaultChecked={publishDefaultChecked}
             className="accent-lime mt-px size-4 shrink-0"
           />
           <label

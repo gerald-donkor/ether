@@ -132,7 +132,56 @@ export const reports = pgTable(
   ],
 );
 
+/**
+ * One row is one owner's generation defaults. **This is not a users table**
+ * (AGENTS.md 7.5): it holds no email, no name, and no identity of any kind.
+ * Clerk still owns identity, and `user_id` is the same owner column every other
+ * table here already carries.
+ *
+ * It lives in Postgres rather than in Clerk metadata because it is application
+ * state. Putting it in Clerk would give the application a second write path
+ * outside `lib/db/`, break the AGENTS.md 6.1 data-layer boundary, and make the
+ * account export read from two providers.
+ *
+ * `user_id` is the primary key and there is no other index, because every read
+ * is by exact owner id.
+ *
+ * `default_visibility` reuses the generation enum, but only `private` and
+ * `public` are ever written: the publish control is a binary checkbox, and a
+ * default it cannot express would be a lie about what will happen. The
+ * constraint below is what enforces that rather than trusting the caller.
+ */
+export const userPreferences = pgTable(
+  "user_preferences",
+  {
+    userId: text("user_id").primaryKey(),
+    defaultModel: text("default_model").notNull(),
+    defaultSize: text("default_size").notNull(),
+    defaultCount: integer("default_count").notNull(),
+    defaultVisibility: generationVisibility("default_visibility")
+      .notNull()
+      .default("private"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check(
+      "user_preferences_default_visibility_binary",
+      sql`${table.defaultVisibility} in ('private', 'public')`,
+    ),
+    check(
+      "user_preferences_default_count_positive",
+      sql`${table.defaultCount} > 0`,
+    ),
+  ],
+);
+
 export type Generation = typeof generations.$inferSelect;
 export type NewGeneration = typeof generations.$inferInsert;
 export type UsageEvent = typeof usageEvents.$inferSelect;
 export type Report = typeof reports.$inferSelect;
+export type UserPreferences = typeof userPreferences.$inferSelect;

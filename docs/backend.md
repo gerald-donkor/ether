@@ -1362,3 +1362,247 @@ Not run at this point: the authenticated two-account browser flow and its focus,
 keyboard, pending, mobile and partial-output states require reusable Clerk
 browser sessions that are not available in this workspace. Those runtime checks
 are not claimed by the database, parser or build results above.
+
+## Account and data rights, prompt 023
+
+Build step 11. Three things, all on `/account`: stored generation defaults, a
+JSON export, and an account deletion that removes the Blob objects as well as
+the rows.
+
+### `user_preferences`, and why it is not a users table
+
+`AGENTS.md` §7.5 forbids a `users` table because Clerk owns identity. This is
+not identity: it holds no email, no name, and no external id beyond the same
+Clerk `user_id` every other table here already carries as its owner column. It
+is application state of exactly the kind `lib/db/` owns, and putting it in Clerk
+metadata would give the application a second write path outside `lib/db/`, break
+the §6.1 data-layer boundary, and make the export read from two providers.
+
+Generated as `drizzle/0006_careful_sphinx.sql`, applied over
+`DATABASE_URL_UNPOOLED`, and read back from `information_schema` afterwards. The
+DDL, exactly as generated:
+
+```sql
+CREATE TABLE "user_preferences" (
+	"user_id" text PRIMARY KEY NOT NULL,
+	"default_model" text NOT NULL,
+	"default_size" text NOT NULL,
+	"default_count" integer NOT NULL,
+	"default_visibility" "generation_visibility" DEFAULT 'private' NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "user_preferences_default_visibility_binary" CHECK ("user_preferences"."default_visibility" in ('private', 'public')),
+	CONSTRAINT "user_preferences_default_count_positive" CHECK ("user_preferences"."default_count" > 0)
+);
+```
+
+The migration is purely additive: it creates one table and alters nothing.
+
+`user_id` is the primary key and there is no other index, because every read is
+by exact owner id. `default_visibility` reuses the existing
+`generation_visibility` enum but the check constraint narrows it to `private`
+and `public`: the publish control is a binary checkbox, and a stored default the
+control cannot express would be a lie about what will happen. `unlisted` is
+therefore reachable per image on `/g/[id]` and never as a default.
+
+Writes go through `savePreferencesForOwner` in `lib/db/account.ts`, an
+`onConflictDoUpdate` on the primary key that stamps `updated_at` inside the
+statement rather than from the caller.
+
+### Defaults are a convenience, never a consent
+
+`/generate` seeds its controls from the row and nothing more. The generate
+action still parses the submitted form with `generationRequestSchema` and still
+derives publication from the submitted checkbox, so a stored `public` default
+sets that checkbox's initial state and the server still reads consent from the
+request. Nothing in the generate action or its quota path changed.
+
+**A stored default that later becomes invalid must not break `/generate`.** A
+model id is one edit away from leaving `lib/ai/catalog.ts` (§5.3 rule 2), so
+`resolveGenerationChoice` in the new `lib/generations/choice.ts` resolves the
+row through the catalog and falls back field by field: an unknown model falls
+back to `DEFAULT_MODEL_ID`, and a size the resolved model does not declare falls
+back to that model's first size. Nothing outside the closed list is ever
+rendered as an option or sent to the action.
+
+`GenerationChoice` and `DEFAULT_GENERATION_CHOICE` moved out of
+`components/app/GenerationControls.tsx` into that module in the same change,
+because the server now resolves a choice before any client component renders and
+the fallback must keep exactly one definition. The controls themselves, and the
+documented form-reset effect in them, are unchanged.
+
+The model/size pairing rule moved to `refineModelSizePair` in
+`lib/validation/generation.ts` for the same reason: two schemas enforce it now,
+the generate request and the account defaults, so it is written once and applied
+twice.
+
+### The export, and its §6.1 deviation
+
+`GET /account/export`, at `app/(app)/account/export/route.ts`, Node.js runtime
+and `force-dynamic`.
+
+**This is a stated deviation from `AGENTS.md` §6.1**, which reserves Route
+Handlers for external callers. The argument: §6.2's hard boundary is about
+*mutations*, and this handler mutates nothing. An export is a read that has to
+answer with a non-HTML content type and a download disposition, which a Server
+Component cannot do and a Server Action cannot do without shipping the whole
+payload into the browser as a string and building a `blob:` URL in client code.
+The handler stays thin: session, one call into `lib/db/`, serialise.
+
+The payload, all filtered on the session owner inside the queries:
+
+| key | contents |
+| --- | --- |
+| `version`, `generatedAt` | `1`, and an ISO timestamp, so the file stays legible later |
+| `account` | the Clerk user id, primary email, and join date, so the file is self-describing |
+| `generations` | **every** row including soft-deleted and taken-down ones, with prompt, image url, model, dimensions, visibility and all three timestamps |
+| `usageEvents` | the owner's usage rows |
+| `preferences` | the row, or `null` |
+| `reportsFiled` | only reports this owner filed, by category and date |
+
+`reportsFiled` is the privacy boundary in the other direction. Reports filed
+*against* this owner's images are somebody else's data and never cross, and no
+reporter id appears anywhere in the payload.
+
+**Nothing from the payload is logged.** It is prompts and an email address,
+which §8.3 rule 2 puts off-limits to the console entirely, so a failure logs the
+error's name and nothing else.
+
+Non-goal, deliberately: it is a JSON manifest carrying image **urls**, not a zip
+of image bytes. Bundling megabytes of Blob objects through a function is a
+different problem with a memory and duration budget, and the urls are directly
+fetchable for as long as the account exists.
+
+### `deleteAccount`, and why it is ordered the way it is
+
+`app/(app)/account/actions.ts`, following §10's lettered path.
+
+The ordering is the argument `deleteGeneration` already makes: **blobs before
+rows**, because a deleted row whose image is still live at a public url is a
+broken promise behind a success message. Clerk goes last, because the sign-in is
+the one thing that can be removed after the data without leaving anything
+readable.
+
+- **a.** `await auth()`. No client-supplied owner id exists to ignore.
+- **b.** `deleteAccountSchema` parses the typed confirmation. The word is
+  `delete`, compared after trimming and lowercasing, and it is a typed field
+  rather than a browser `confirm()` dialog.
+- **c.** No quota check. Deleting spends no provider money.
+- **d.** Authorisation *is* the owner filter: every statement is scoped to the
+  session id.
+- **e.** `listAllImageUrlsForOwner` reads every url including soft-deleted and
+  taken-down rows, and `deleteGenerationImages` deletes them in chunks. A chunk
+  failure aborts before any row is deleted and returns a handled error.
+- **f.** `purgeOwnerData` deletes from `generations`, `usage_events`,
+  `user_preferences`, and `reports` where this owner is the reporter.
+- **g.** `(await clerkClient()).users.deleteUser(userId)`. If this fails after
+  the rows are gone the user is told the true thing: the data is deleted and the
+  sign-in could not be removed.
+- **h.** Revalidate `/account`, `/generate` and `/library`; only a public row
+  additionally calls `updateTag(PUBLIC_GENERATIONS_TAG)` and revalidates `/` and
+  `/community`. Whether the owner had public work is read *before* the purge,
+  because afterwards there is nothing left to ask. Then `redirect("/")`, which
+  is the same stated deviation from §10 rule 5 that `deleteGeneration` carries,
+  and which sits outside every `try` because `redirect` signals by throwing.
+
+**`db.batch()`, not `db.transaction()`.** Verified in
+`node_modules/drizzle-orm/neon-http/session.js:151`: the neon-http driver's
+`transaction` throws `No transactions support in neon-http driver`. `batch`
+sends the statements to Neon's HTTP endpoint through `client.transaction(...)`,
+so it is the one transaction the driver allows. Both the purge and the export
+read use it.
+
+Reports filed *against* this owner's generations need no statement of their own:
+`reports.generation_id` carries `on delete cascade`, which was verified rather
+than assumed (see below).
+
+Deleting the owner's usage events is correct rather than a quota hole. The Clerk
+user is destroyed in the same operation and a new signup gets a new id, so
+retaining them would protect nothing and would keep data the user asked to
+remove.
+
+### The Blob chunk size, and its reason
+
+`deleteGenerationImages` in `lib/storage/generations.ts` chunks at **100 urls**.
+`del` is typed `(urlOrPathname: string[] | string, options?): Promise<void>`
+(`node_modules/@vercel/blob/dist/index.d.ts:78`) and **states no maximum array
+length**, so 100 is a chosen bound and not a documented one: it keeps a single
+request's body small and predictable on an account with a long history, and it
+keeps one failure from being a failure of every url at once. It throws on the
+first failing chunk rather than continuing, because the caller must abort before
+any row is removed.
+
+### Verification, prompt 023
+
+Run on 2026-08-13. Every command's output was read, not assumed.
+
+- `npm run db:generate` produced `drizzle/0006_careful_sphinx.sql` and reported
+  `user_preferences 7 columns 0 indexes 0 fks`. The SQL was read before applying
+  it and is quoted above.
+- `npm run db:migrate` reported `migrations applied successfully!`.
+- A read-only `information_schema` query confirmed the seven columns, their
+  types, `is_nullable` and defaults exactly as the DDL states, plus all three
+  constraints (`user_preferences_pkey`, the visibility check rendered as
+  `default_visibility = ANY (ARRAY['private','public'])`, and the count check).
+  The table held 0 rows.
+- `npm run lint` produced no output.
+- `npm test` passed 4 of 4.
+- `npm run build` compiled, finished TypeScript, and generated 18 static pages.
+- **Route table diff against a pre-change build:** the only difference is one
+  added line, `├ ƒ /account/export`. No existing route changed mode.
+- **The landing page is byte-identical.** `.next/server/app/index.html` was
+  126,310 bytes before and after, and the normalised diff returned `IDENTICAL`.
+- **The environment-absent build passed.** `.env.local` was moved aside, the
+  build produced the full route table, and the file was restored and confirmed
+  present.
+- **Client-bundle secret scan:** `BLOB_READ_WRITE_TOKEN`, `DATABASE_URL` and
+  `CLOUDFLARE_API_TOKEN` each appear in 0 files under `.next/static/`.
+  `CLERK_SECRET_KEY` appears in 1, which is the known permanent name-only hit
+  documented in `docs/automation.md`; searching for its **value** returns 0, as
+  does searching for the blob token's value.
+- **The deletion, exercised end to end at the layer the action calls**, against
+  a real throwaway Clerk user created through the backend API, alongside a
+  second synthetic owner. Booleans and counts only were printed; no owner id,
+  prompt, row id, url or email address was logged. All checks passed:
+  the export carried both rows including the soft-deleted one, the usage event,
+  the preferences row, and only the report this owner filed, and contained no
+  trace of the second owner; the url read included the soft-deleted row; both
+  Blob objects went from 200 to 404; the purge removed 2 generations, 1 usage
+  event, 1 preferences row and 1 filed report; all four tables held nothing for
+  the owner afterwards; the report the *other* owner had filed against this
+  owner's image cascaded away; the second owner's row and Blob object were
+  untouched; and `getUser` on the deleted Clerk id threw. Cleanup left no
+  synthetic rows.
+- An unauthenticated `GET /account/export` against `npm run start` returned
+  `307` to `/sign-in?redirect_url=…`, with `x-clerk-auth-status: signed-out`.
+  `/` still returned 200 from the same server.
+
+#### Blob deletion is not instantly visible, and that is worth recording
+
+The first two runs of the deletion check **failed** on "both blobs 404 after
+deletion", reading 200 immediately after `del` returned. It is a propagation
+delay, not a failed delete: polling showed 200 at +0ms, +1s, +2s and +4s, then
+404 at +8s, and the rows and the second owner's object behaved correctly
+throughout. An isolated test of the same `deleteGenerationImages` function, and
+of a raw single and array `del`, returned 404 immediately, so the delay is
+variable rather than a property of the array form.
+
+This qualifies the "200 before, 404 after" line recorded for prompt 016: that
+observation was made through a slower manual flow. **A deletion check that
+fetches the url immediately after `del` can report a false failure.** Poll.
+
+#### What could not be run
+
+The authenticated browser flow was **not** run and is not claimed: signing in as
+the throwaway account needs a real mailbox for Clerk's verification, which this
+workspace does not have. Specifically not exercised:
+
+- the export **downloaded through the browser** as an attachment. Its payload
+  was verified directly against `readAccountExport`, and the handler's headers
+  and 401 branch were read but not observed over an authenticated request.
+- the two-step delete confirm's focus, keyboard and pending states in a real
+  browser, and the post-deletion `redirect("/")`.
+- `/` and `/community` observed dropping a public image after an account
+  deletion. The guarded `updateTag` and `revalidatePath` branch is the same one
+  `deleteGeneration` uses, and there is no way to watch `unstable_cache` expire
+  from outside.
