@@ -231,8 +231,11 @@ table — and when a step has been worked out twice, add it to
 `docs/automation.md` in the same change. The point is that a later session
 starts from the command rather than from the investigation.
 
-Still uncaptured, because each has been done only once: screenshot comparison
-of `/` across breakpoints, and extracting a raster from the reference PDF.
+Still uncaptured, because it has been done only once: extracting a raster from
+the reference PDF. Comparing `/` across a change **is** captured, and not as a
+screenshot diff: `docs/automation.md` compares the prerendered HTML, which is
+exact where three screenshots are not, and covers both the unchanged case and
+the deliberately-changed one.
 
 # 4. Prompt files
 

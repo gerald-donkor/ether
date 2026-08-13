@@ -133,6 +133,51 @@ nothing about. `resize_window` in the browser tools did **not** reflow this
 page's viewport when it was tried on 2026-08-13. Capture a fresh page at each
 breakpoint instead of resizing one browser page and assuming it changed.
 
+### When the diff is supposed to be non-empty
+
+A change that deliberately alters `/` cannot use `IDENTICAL` as its result. It
+still has to prove the change is confined to the elements it claimed. The
+normalisation above will not help, because the byte counts legitimately differ,
+and a whole-document `diff` on a minified single-line HTML file reports one
+enormous line. **Split the document on tag boundaries first**, then diff:
+
+```bash
+for f in before after; do
+  perl -0pe 's#<script\b.*?</script>##gs;
+             s#<link rel="preload" as="script"[^>]*>##g;
+             s#<link rel="stylesheet" href="[^"]+"#<link rel="stylesheet" href="STYLE"#g;
+             s#__variable_[A-Za-z0-9_]+#FONT#g' /tmp/index-$f.html \
+  | perl -0pe 's#(<)#\n$1#g' > /tmp/visible-$f.txt
+done
+diff /tmp/visible-before.txt /tmp/visible-after.txt
+```
+
+The result is a per-element diff you can read. **Do not use `tr '>' '>\n'` for
+the split** - it breaks inside attribute values and produces a 200KB diff of
+noise. Split on `<`, the tag opener, which no attribute value on this page
+contains.
+
+The pass condition is that every hunk is an element the prompt named. Used on
+2026-08-13 to show that turning the two feature media pills into lockups changed
+exactly four lines of `/` and nothing else.
+
+### Confirm a tab stop was removed without walking the whole page
+
+Markup identity says a stop was not lost; it does not say the intended one went
+away. Run this in the page rather than pressing Tab thirty times:
+
+```js
+const f=[...document.querySelectorAll('a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"])')];
+JSON.stringify({count:f.length, hits:f.filter(e=>/<label>/.test(e.textContent)).length})
+```
+
+The count is compared against the before count, and the delta must equal the
+number of stops the change intended to remove. Then Shift+Tab from the stop that
+followed the removed one and read `document.activeElement` to confirm focus now
+skips straight past it. Check `getComputedStyle(document.activeElement).outlineColor`
+is `rgb(210, 255, 58)` while you are there - that is `--lime`, and it is the
+§6.8 ring.
+
 ## Check a secret never reached the browser
 
 Run after any change that adds a server-only variable (§8.4).

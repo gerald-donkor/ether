@@ -175,10 +175,19 @@ state change, the caret does not rotate, and §3 gains no row.
 | Variant | Fill | Text | Border | Use |
 |---|---|---|---|---|
 | Primary | `--lime` | `--ink` | none | `Try Free ↗`, `Generate` |
-| Ghost | transparent | `--text` | `1px --line` | `YOUTUBE`, `PODCAST` media pills |
+| Ghost | transparent | `--text` | `1px --line` | `Download`, `Report`, and the other secondary actions on the application routes |
 | Nav | transparent | `--text` | none | menu items |
 
 All `--r-pill`. Labels max 3 words and **must not wrap at desktop**. `:active` applies `scale(0.98)`. Focus is a 2px `--lime` ring at 2px offset - visible on every interactive element, no exceptions.
+
+**The ghost pill splits into a static half and a pressable half.** `pillShape`
+and `pillGhostSurface` are exported from `components/ui/Button.tsx` and hold the
+shape, layout, type and hairline border; the transition and the `:active` and
+`:hover` responses are added on top of them only for the real `Button`. A
+non-interactive lockup wears the two exported halves and nothing else, so its
+resting paint cannot drift from the variant while it carries no affordance it
+is unable to honour. Composing a lockup by copying the variant's class string
+is what this split exists to prevent.
 
 ### 2.3 Hero tile grid
 
@@ -188,7 +197,18 @@ This grid has exactly five cells because there are exactly five things to say. D
 
 ### 2.4 Feature cards
 
-`--surface` fill, `--r-panel`, 32px padding, two-up on `--container`. Left card ends in two ghost pills; right card ends in a live prompt field - a `--surface-2` pill input with a `--lime` `Generate` button inset on the right. Label sits above the input; placeholder is never the label.
+`--surface` fill, `--r-panel`, 32px padding, two-up on `--container`. Left card ends in two `YOUTUBE` and `PODCAST` media lockups; right card ends in a live prompt field - a `--surface-2` pill input with a `--lime` `Generate` button inset on the right. Label sits above the input; placeholder is never the label.
+
+**The two media lockups are not links and not tab stops.** Ether has no
+verified YouTube channel and no verified podcast, so the rule recorded in §2.10
+governs them: an unverified account stays a non-interactive visual lockup until
+a verified URL exists. They read as the ghost pill at rest, down to the fill,
+hairline, radius, padding, 12px type, `0.08em` tracking, uppercase transform and
+18px filled Phosphor icon, and they drop the hover border shift and the
+`scale(0.98)` press, because a press response on something that cannot be
+pressed is an affordance that lies. Only the icons carry `aria-hidden`; the
+words stay in the accessibility tree as visible text. This is the whole reason
+`Button.tsx` exports its static halves (§2.2).
 
 ### 2.5 Stat block
 
@@ -342,6 +362,12 @@ type, spacing, borders, and the established surface token. They read no request
 state, provider, secret, or user data and add no motion. Footer destinations use
 real internal links; unverified social accounts remain non-interactive visual
 lockups until verified URLs exist.
+
+**That last rule is site-wide, not footer-only.** It also governs the landing
+page's `YOUTUBE` and `PODCAST` media pills (§2.4), which is what closed the last
+two `href="#"` targets on `/`. Neither an invented external URL nor a new
+internal route for a channel the product does not have is an acceptable
+alternative: both would be a destination fabricated to satisfy a link.
 
 ### 2.11 The single artefact record
 

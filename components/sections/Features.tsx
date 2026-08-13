@@ -1,9 +1,17 @@
 import { YoutubeLogo } from "@phosphor-icons/react/dist/ssr/YoutubeLogo";
 import { SpotifyLogo } from "@phosphor-icons/react/dist/ssr/SpotifyLogo";
 import { Container } from "@/components/ui/Container";
-import { Button } from "@/components/ui/Button";
+import { pillShape, pillGhostSurface } from "@/components/ui/Button";
 import { PromptField } from "@/components/ui/PromptField";
 import { Reveal } from "@/components/motion/Reveal";
+
+/**
+ * The two media pills read as the ghost pill at rest and are not interactive:
+ * Ether has no verified channel to send anyone to, so they carry no href, no
+ * tab stop, and none of the ghost variant's hover or press response. Composed
+ * from Button's exported halves so the resting paint cannot drift from it.
+ */
+const LOCKUP = `${pillShape} ${pillGhostSurface} px-5 py-2.5 text-[12px] tracking-[0.08em] uppercase`;
 
 export function Features() {
   return (
@@ -25,7 +33,8 @@ export function Features() {
               </p>
 
               <div className="mt-auto flex flex-wrap gap-3 pt-8">
-                <Button variant="ghost" href="#" className="px-5 py-2.5 text-[12px] tracking-[0.08em] uppercase">
+                {/* Verified channel URLs are required before these become links. */}
+                <span className={LOCKUP}>
                   Youtube
                   <YoutubeLogo
                     size={18}
@@ -33,8 +42,8 @@ export function Features() {
                     className="text-youtube"
                     aria-hidden="true"
                   />
-                </Button>
-                <Button variant="ghost" href="#" className="px-5 py-2.5 text-[12px] tracking-[0.08em] uppercase">
+                </span>
+                <span className={LOCKUP}>
                   Podcast
                   <SpotifyLogo
                     size={18}
@@ -42,7 +51,7 @@ export function Features() {
                     className="text-violet"
                     aria-hidden="true"
                   />
-                </Button>
+                </span>
               </div>
             </article>
           </Reveal>
