@@ -539,20 +539,36 @@ vercel logs <deployment-url>
 Method and path only. A prompt, an email address or a request body in there is a
 §8.3 rule 2 violation and a finding.
 
-### Reading `x-clerk-auth-reason` when a protected route 404s
+### Probe an auth-protected route the way a browser does, or do not probe it
 
-A signed-out request to `/generate`, `/account` or `/library` answering **404**
-instead of redirecting to `/sign-in` is not a routing bug. Check the headers:
+**`curl` with no `Accept` header does not tell you what a user sees**, and on
+2026-08-14 that mistake produced a committed "finding" that was not real. Clerk
+branches on whether the request is a **document request**:
 
 ```bash
-curl -s -D - -o /dev/null https://ether-bay.vercel.app/generate | grep -i clerk
+# Wrong. Sends Accept: */*, gets the 404 rewrite, looks like a broken redirect.
+curl -s -D - -o /dev/null https://ether-bay.vercel.app/generate
+
+# Right. What a browser sends, and what the flow actually does.
+curl -s -D - -o /dev/null \
+  -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' \
+  https://ether-bay.vercel.app/generate | grep -iE '^(HTTP|location|x-clerk)'
+
+# And follow it, because one hop of a four-hop handshake proves nothing.
+curl -s -L -o /dev/null -w '%{http_code} %{num_redirects} %{url_effective}\n' \
+  -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' \
+  https://ether-bay.vercel.app/generate
 ```
 
-`x-clerk-auth-reason: protect-rewrite, dev-browser-missing` means the Clerk
-**development** instance's `__clerk_db_jwt` querystring handshake never
-happened. Any non-browser client sees this, and a cookie jar does not fix it,
-because the mechanism is not cookie-based. The boundary is holding; the
-redirect is what a production Clerk instance would restore.
+| what came back | what it means |
+| --- | --- |
+| `404`, `x-clerk-auth-reason: protect-rewrite, dev-browser-missing` | you sent `Accept: */*`. Correct response to a non-document request for a protected page. **Not a defect** |
+| `307` to `…/v1/client/handshake?…`, `x-clerk-auth-status: handshake` | the real path. Follow it |
+| `200` at `/sign-in?redirect_url=…` after 4 redirects | the pass. This is what a signed-out user gets |
+
+The handshake exists because a Clerk **development** instance carries its
+session in a `__clerk_db_jwt` querystring rather than an `HttpOnly` cookie. A
+cookie jar therefore does not help, and its absence is not evidence of anything.
 
 ## Scan a deployed client bundle for secrets
 

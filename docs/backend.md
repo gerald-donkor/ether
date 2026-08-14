@@ -2707,11 +2707,14 @@ since only `NEXT_PUBLIC_*` is inlined into client bundles. No value accompanies
 it. The two hits are one occurrence in one chunk, counted twice because the
 chunk was downloaded under two filenames.
 
-### Finding: the protected routes answer 404, not a sign-in redirect
+### Not a finding: the protected routes are fine, and `curl` is not a user
 
-`/generate`, `/account`, `/account/export` and `/library` return **404** to a
-signed-out client rather than redirecting to `/sign-in`. The response headers
-name the cause exactly:
+**This was first recorded as a defect and it is not one.** The correction is
+kept rather than deleted, because the wrong version was committed and because
+the measurement mistake behind it will recur.
+
+Probed with `curl`'s default `Accept: */*`, `/generate`, `/account`,
+`/account/export` and `/library` answer **404** to a signed-out client:
 
 ```
 x-clerk-auth-reason:  protect-rewrite, dev-browser-missing
@@ -2719,21 +2722,36 @@ x-clerk-auth-status:  signed-out
 x-matched-path:       /404
 ```
 
-**The security boundary holds** — a signed-out caller receives no protected
-content, `proxy.ts`'s `auth.protect()` is doing its job, and this is not a
-regression from this prompt, which changed no code. What is wrong is the
-experience, and the cause is the Clerk **development** instance recorded below:
-a development instance carries its session in a `__clerk_db_jwt` querystring
-rather than a cookie, so a client that has not completed the dev-browser
-handshake is rewritten to 404 instead of redirected. A cookie jar does not fix
-it, because the mechanism is not cookie-based. Fixing it properly is the Clerk
-production instance, which is gated on a custom domain. **Not fixed here**: a
-code change was out of scope for this prompt.
+That looks like a broken sign-in redirect. It is not. **Clerk branches on
+whether the request is a document request**, and the same URL with a browser's
+`Accept: text/html,…` header answers **307 to the handshake** instead:
+
+```
+HTTP/2 307
+location: https://healthy-chamois-55.clerk.accounts.dev/v1/client/handshake
+          ?redirect_url=https%3A%2F%2Fether-bay.vercel.app%2Fgenerate&…
+          &__clerk_hs_reason=dev-browser-missing&format=nonce
+x-clerk-auth-reason:  dev-browser-missing
+x-clerk-auth-status:  handshake
+```
+
+Followed to the end, that chain is **4 redirects terminating at
+`https://ether-bay.vercel.app/sign-in?redirect_url=…%2Fgenerate`, HTTP 200**.
+The real flow works, on the development instance, exactly as intended, and the
+404 is the correct answer to give a non-document request for a protected page.
+
+**The lesson, which is the reason this section survives:** a protected route
+probed with `curl` and no `Accept` header does not tell you what a user sees.
+Send `Accept: text/html` before concluding anything about an auth redirect, and
+follow the chain with `-L` before calling a status code a defect. The route
+sweep earlier in this section recorded those four 404s; they are correct for
+what was sent, and they are not evidence of a broken redirect.
 
 ### Still open, after 031
 
-**1. Clerk is running on a development instance, and this is now the largest
-open item.** The publishable key resolves to
+**1. Clerk is running on a development instance.** This is the largest open
+item, though **not because anything is broken** — the sign-in flow was verified
+working above. It is a ceiling, not a defect. The publishable key resolves to
 `healthy-chamois-55.clerk.accounts.dev`, and it is the same `pk_test_` key on
 Production, Preview and Development. Three independent confirmations landed
 here: the `dev-browser-missing` header above, Clerk's telemetry notice in the
@@ -2766,8 +2784,8 @@ to ask first. Left for the user.
 **3. The two-account boundary through the browser.** Unchanged. It needs two
 real Clerk sign-ins, still a prohibited action for the implementing agent. This
 prompt makes it *possible* — there is now a reachable deployment — and does not
-claim to have done it. Note that the 404 finding above will make those sign-ins
-behave oddly from anything but a real browser.
+claim to have done it. A real browser is the right tool for it anyway, since the
+handshake above is what a non-browser client does not complete.
 
 **4. A foreign Checkout Session retried for three days.** Now *observable* for
 the first time, since retries only apply to a registered endpoint, but not yet
