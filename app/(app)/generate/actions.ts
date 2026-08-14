@@ -128,6 +128,14 @@ export async function generateGeneration(
     return failure("The generator's daily capacity has been reached.");
   }
 
+  // A hold is not an empty balance, and saying so would contradict the real
+  // balance /account is showing at the same moment.
+  if (quota.status === "billing_hold") {
+    return failure(
+      "This account is on hold while a payment dispute is open. Images you already made are unaffected.",
+    );
+  }
+
   if (quota.status === "insufficient_credits") {
     return failure("You do not have enough credits for this request.");
   }

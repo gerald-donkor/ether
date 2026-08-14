@@ -1746,3 +1746,129 @@ so the operation is retryable.
   dispute, duplicate replay, and authenticated keyboard/mobile checks were not
   run because this commit has no deployed Preview handler or configured signing
   secret. They remain the activation gate described above.
+
+## Billing correctness fixes, prompt 026
+
+Six defects in the committed prompt 025 implementation (`668cbc7`). No
+commercial rule, price, grant, allowance, expiry rule, refund policy or tax
+posture changed, and no provider, package or environment variable was added.
+
+### What was verified, against what, on 2026-08-14
+
+The Stripe CLI is not installed in this workspace, so `stripe docs` could not be
+used and the live pages were fetched directly.
+
+| surface | source | result |
+| --- | --- | --- |
+| `invoice.paid` provisioning rule | `https://docs.stripe.com/billing/subscriptions/webhooks` | "Sent when the invoice is successfully paid. You can provision access to your product when you receive this event and the subscription `status` is `active`." Nothing in that guidance involves a PaymentIntent |
+| provisionable statuses | the same page's status table | `active` is "in good standing"; `trialing` is where "you can safely provision your product for your customer". `canceled` and `unpaid` say to revoke access |
+| `invoice.paid` semantics | `https://docs.stripe.com/api/events/types` | "Occurs whenever an invoice payment attempt succeeds **or an invoice is marked as paid out-of-band**", which is why a PaymentIntent is not guaranteed |
+| `refund.created` | the same page | "Occurs whenever a refund is created." A real event type |
+| `Invoice.id` | `node_modules/stripe/esm/resources/Invoices.d.ts:130` | required `string`, so it is always available as an idempotency key |
+| `Refund.payment_intent` | `node_modules/stripe/esm/resources/Refunds.d.ts:108` | `string`, `PaymentIntent` or `null`, so the existing null guard stays |
+| `Subscription.Status` | `node_modules/stripe/esm/resources/Subscriptions.d.ts:473` | the closed union widened by `OtherString`, so an unmodelled status is rejected rather than cast |
+
+Installed SDK `stripe` 22.5.0. No skill covering plpgsql was found; the function
+replacement was written against the existing committed function and verified by
+reading it back out of `pg_proc`.
+
+### The six corrections
+
+1. **`getPurchaseGrantCredits` filters on the grant reasons.** A reversal
+   carries the same `stripe_object_id` as the grant it compensates, and
+   `credit_ledger_purchase_object_idx` is partial over the grant reasons only,
+   so several rows share one object id. Unfiltered, a second partial refund
+   could read the earlier reversal's negative delta and revoke one credit
+   instead of the proportional amount. The filter makes at most one row match,
+   which the partial index guarantees.
+2. **The subscription grant is keyed on the invoice id, not a PaymentIntent.**
+   The `invoicePayments.list` lookup and the `Missing invoice PaymentIntent`
+   throw are gone, so an invoice settled out of band no longer returns 500 and
+   no longer makes Stripe retry the same event for three days. The grant now
+   runs only when the synced subscription status is `active` or `trialing`; any
+   other status syncs the row, grants nothing, and answers 200.
+
+   **Consequence, stated rather than hidden:** top-up grants stay keyed on the
+   PaymentIntent, so `refund.created` against a *subscription* invoice finds no
+   grant and reverses nothing. That matches the recorded policy, which scopes
+   refund reversal to the associated top-up.
+3. **A dispute hold is its own outcome.** `reserve_generation_capacity` returned
+   `insufficient_credits` with `credits_remaining = 0` for a held owner, which
+   contradicted the real positive balance `/account` was showing at the same
+   moment. Migration `0009_billing_hold_outcome.sql` replaces the function so
+   the hold branch returns `billing_hold` and the real balance. `/generate`
+   renders one plain sentence: the account is on hold while a payment dispute is
+   open, and existing images are unaffected. Nothing else in the function moved.
+4. **A refund too small to cost a credit costs none.** `Math.max(1, maximum)`
+   revoked one credit for a refund whose proportional share floored to zero,
+   which contradicted the "only the unspent proportional part" rule. The caller
+   now skips the reversal entirely at zero, and `reverse_purchase_credits` keeps
+   rejecting a non-positive maximum.
+5. **The webhook's two pure decisions moved to `lib/billing/events.ts`** -
+   `toBillingSubscriptionStatus`, `isProvisionableStatus` and
+   `revocableCreditsForRefund`. It is `server-only`, reads no environment and
+   imports nothing. `npm test` gained `--conditions=react-server` so an env-free
+   test can import it, exactly as `test:db` and `test:billing-db` already do.
+6. **`BillingPanel` composes from the pill halves.** `components/ui/Button.tsx`
+   now exports `pillPressable` and `pillPrimarySurface` alongside `pillShape`
+   and `pillGhostSurface`. `Button`'s own rendered class lists are unchanged.
+
+### Verification
+
+- `npm run db:generate` reported ten tables and `No schema changes, nothing to
+  migrate`, which is correct: the change is a function body, not a schema diff.
+  The migration was created with `drizzle-kit generate --custom
+  --name=billing_hold_outcome`, which is how a function replacement enters this
+  repository's journal. `npm run db:migrate` reported `migrations applied
+  successfully!`.
+- Reading `pg_proc` back: seven public functions, `'billing_hold'::text` present
+  in `reserve_generation_capacity`, the hold branch returning `v_balance`,
+  exactly one remaining `insufficient_credits` occurrence, and the same 16
+  indexes across the billing and credit tables.
+- `npm run lint` completed with no diagnostics.
+- `npm test`: 9 tests, 9 pass, 0 fail, including the closed status mapping, the
+  provisionable set over all eight statuses plus an unmodelled one, and ten
+  refund-proportion cases covering the floor to zero, the clamp to the grant,
+  and malformed input.
+- `npm run test:billing-db`: 3 tests, 3 pass, including the out-of-order
+  subscription update and the `billing_hold` outcome reporting the real balance.
+  It also asserts the grant lookup still returns 100 after a reversal wrote a
+  second row with the same object id, which is defect 1's regression.
+- `npm run test:db`: 1 test, 1 pass.
+- `npm run build` compiled, completed TypeScript and generated 18 static pages.
+  Its route table `diff` against a stashed baseline build of the same commit
+  returned `IDENTICAL`.
+- `/` is byte-identical: both prerendered documents were 125,912 bytes and the
+  normalised `diff` returned `IDENTICAL`.
+- `Button`'s primary and ghost class lists are identical to `HEAD`'s, compared
+  as class-token sets. `BillingPanel`'s two button class lists each gain
+  `gap-2` and `whitespace-nowrap`, and the primary one gains `hover:bg-lime/90`.
+  Nothing was removed. `gap-2` is inert on a button with one text child;
+  `whitespace-nowrap` only binds at a width where these short labels do not
+  wrap; `hover:bg-lime/90` is a real change, and it is the hover response every
+  other primary pill on the site already has, which is the drift the extraction
+  exists to remove.
+- The environment-absent build passed after clearing `.next`. It generated all
+  18 static pages and printed the expected handled community and public-gallery
+  fallback messages. `.env.local` was restored and confirmed present.
+- The client bundle scan returned zero exact-name hits for `STRIPE_SECRET_KEY`,
+  `STRIPE_WEBHOOK_SECRET`, `DATABASE_URL`, `DATABASE_URL_UNPOOLED`,
+  `BLOB_READ_WRITE_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`.
+  `CLERK_SECRET_KEY` had the one documented SDK name-only hit. Every exact
+  secret-value scan returned zero.
+
+### The activation gate is unchanged
+
+`which stripe` returns nothing and `STRIPE_WEBHOOK_SECRET` is absent from
+`.env.local`, so the sandbox end-to-end matrix still could not run: no Checkout,
+webhook delivery, portal, cancellation, refund, dispute or duplicate-replay
+check was performed against Stripe. These corrections are argued from the live
+documentation, the installed types and the database, not from a delivered event.
+Create the sandbox destination and set `STRIPE_WEBHOOK_SECRET` in Development
+and Preview once a deployment of this commit exists, then run that matrix.
+
+**One thing to decide, not to invent.** The approved policy says a dispute
+revokes the remaining grant and holds paid generation until Stripe closes the
+dispute. It does not say what happens when the dispute is *won*: today
+`charge.dispute.closed` lifts the hold for every outcome and restores no
+credits. Restoring them would be a new commercial rule, so it was not written.

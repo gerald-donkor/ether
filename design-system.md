@@ -189,6 +189,13 @@ resting paint cannot drift from the variant while it carries no affordance it
 is unable to honour. Composing a lockup by copying the variant's class string
 is what this split exists to prevent.
 
+`pillPressable` and `pillPrimarySurface` are exported alongside them, so a
+`<button>` outside `Button` - which renders an `<a>` and cannot be one - wears
+the shape, the response and the primary surface rather than a second copy of
+the class string. `BillingPanel` is the first caller. A `<button>` composed this
+way keeps the hover and the `:active` response, because unlike a lockup it is
+genuinely pressable.
+
 ### 2.3 Hero tile grid
 
 The signature composition: five tiles of unequal size in a two-row asymmetric grid - a generated-image card with an overlaid `AI Generator` caption, a lime `300+ Projects` tile, a violet community card with an avatar stack, a violet brand block carrying the abstract mark, and the lime `Try Free ↗` CTA. Cells overlap the row seam rather than aligning to it.

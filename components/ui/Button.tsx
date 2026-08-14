@@ -21,14 +21,21 @@ export const pillShape =
 /** The ghost pill's static half: hairline border, body text. */
 export const pillGhostSurface = "border border-line text-text";
 
-/** What makes a pill feel pressable. Only an interactive pill gets this. */
-const pressable =
+/**
+ * What makes a pill feel pressable. Only an interactive pill gets this.
+ * Exported so a `<button>` elsewhere wears the same response without copying
+ * the durations and the easing token.
+ */
+export const pillPressable =
   "transition-transform duration-200 ease-(--ease-out) active:scale-[0.98]";
 
-const base = `${pillShape} ${pressable}`;
+/** The primary pill's surface: lime on ink, with its hover. */
+export const pillPrimarySurface = "bg-lime text-ink hover:bg-lime/90";
+
+const base = `${pillShape} ${pillPressable}`;
 
 const variants: Record<Variant, string> = {
-  primary: "bg-lime text-ink hover:bg-lime/90",
+  primary: pillPrimarySurface,
   ghost: `${pillGhostSurface} hover:border-text-3`,
 };
 

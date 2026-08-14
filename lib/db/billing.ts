@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "./index";
 import {
   billingCustomers,
@@ -75,7 +75,7 @@ export async function readBillingSummary(userId: string) {
 
 export type CapacityReservation =
   | { status: "accepted"; ownerWindowUsed: number; ownerWindowRemaining: number; resetAt: Date | null; creditsRemaining: number }
-  | { status: "account_limit" | "provider_capacity" | "insufficient_credits"; ownerWindowUsed: number; ownerWindowRemaining: number; resetAt: Date | null; creditsRemaining: number }
+  | { status: "account_limit" | "provider_capacity" | "insufficient_credits" | "billing_hold"; ownerWindowUsed: number; ownerWindowRemaining: number; resetAt: Date | null; creditsRemaining: number }
   | { status: "unavailable" };
 
 type CapacityRow = {
@@ -108,7 +108,7 @@ export async function reserveGenerationCapacity(input: {
     const row = result.rows[0];
     if (!row) return { status: "unavailable" };
     const status = row.outcome;
-    if (!["accepted", "account_limit", "provider_capacity", "insufficient_credits"].includes(String(status))) {
+    if (!["accepted", "account_limit", "provider_capacity", "insufficient_credits", "billing_hold"].includes(String(status))) {
       return { status: "unavailable" };
     }
     const resetAt = row.reset_at == null ? null : new Date(String(row.reset_at));
@@ -204,9 +204,20 @@ export async function reversePurchaseCredits(input: {
   return integer(result.rows[0]?.value);
 }
 
+/**
+ * The positive grant a provider object bought, and only that.
+ *
+ * A reversal carries the same `stripe_object_id` as the grant it compensates,
+ * and `credit_ledger_purchase_object_idx` is partial over the grant reasons
+ * only, so several rows can share one object id. Without the reason filter a
+ * second partial refund can read the earlier reversal's negative delta.
+ */
 export async function getPurchaseGrantCredits(stripeObjectId: string) {
   const [row] = await getDb().select({ credits: creditLedger.delta }).from(creditLedger)
-    .where(eq(creditLedger.stripeObjectId, stripeObjectId)).limit(1);
+    .where(and(
+      eq(creditLedger.stripeObjectId, stripeObjectId),
+      inArray(creditLedger.reason, ["subscription_grant", "top_up_grant"]),
+    )).limit(1);
   return row?.credits;
 }
 

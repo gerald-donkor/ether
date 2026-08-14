@@ -1,5 +1,10 @@
 import type Stripe from "stripe";
 import { getBillingOffer } from "@/lib/billing/catalog";
+import {
+  isProvisionableStatus,
+  revocableCreditsForRefund,
+  toBillingSubscriptionStatus,
+} from "@/lib/billing/events";
 import { getStripe, getStripeWebhookSecret } from "@/lib/billing/stripe";
 import {
   claimBillingWebhook,
@@ -39,8 +44,7 @@ async function syncSubscription(subscription: Stripe.Subscription, event: Stripe
   if (!item || subscription.items.data.length !== 1) throw new Error("Invalid subscription items");
   const offer = await getBillingOffer("studio_monthly");
   if (item.price.id !== offer.priceId) throw new Error("Unapproved subscription price");
-  const statuses = ["incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"] as const;
-  const status = statuses.find((candidate) => candidate === subscription.status);
+  const status = toBillingSubscriptionStatus(subscription.status);
   if (!status) throw new Error("Unsupported subscription status");
   await upsertBillingSubscription({
     stripeSubscriptionId: subscription.id,
@@ -52,7 +56,7 @@ async function syncSubscription(subscription: Stripe.Subscription, event: Stripe
     cancelAtPeriodEnd: subscription.cancel_at_period_end,
     eventCreatedAt: new Date(event.created * 1000),
   });
-  return { ...owner, offer, item };
+  return { ...owner, offer, item, status };
 }
 
 async function applyEvent(event: Stripe.Event) {
@@ -84,10 +88,17 @@ async function applyEvent(event: Stripe.Event) {
     if (!subscriptionId) return undefined;
     const subscription = await stripe.subscriptions.retrieve(subscriptionId);
     const synced = await syncSubscription(subscription, event);
-    const invoicePayments = await stripe.invoicePayments.list({ invoice: invoice.id, status: "paid", limit: 2 });
-    const paymentIntentId = id(invoicePayments.data.find((payment) => payment.is_default)?.payment.payment_intent);
-    if (!paymentIntentId) throw new Error("Missing invoice PaymentIntent");
-    await grantPurchaseCredits({ userId: synced.userId, credits: synced.offer.credits, reason: "subscription_grant", stripeEventId: event.id, stripeObjectId: paymentIntentId, expiresAt: new Date(synced.item.current_period_end * 1000) });
+
+    // Provisioning is what the docs tie to this event, and it is tied to the
+    // subscription's status, not to a payment object. Any other status has
+    // synced the row and is a handled outcome, so it answers 200 rather than
+    // making Stripe retry the same event for three days.
+    if (!isProvisionableStatus(synced.status)) return synced.userId;
+
+    // The invoice is the idempotency key, not a PaymentIntent: an invoice can
+    // be paid out of band or from the customer's credit balance and then have
+    // none, while `Invoice.id` is a required string in stripe@22.5.0.
+    await grantPurchaseCredits({ userId: synced.userId, credits: synced.offer.credits, reason: "subscription_grant", stripeEventId: event.id, stripeObjectId: invoice.id, expiresAt: new Date(synced.item.current_period_end * 1000) });
     return synced.userId;
   }
 
@@ -99,8 +110,12 @@ async function applyEvent(event: Stripe.Event) {
     const owner = await ownerFor(intent.customer);
     const grantCredits = await getPurchaseGrantCredits(paymentIntentId);
     if (!grantCredits) return owner.userId;
-    const maximum = Math.floor((grantCredits * refund.amount) / intent.amount);
-    await reversePurchaseCredits({ stripeObjectId: paymentIntentId, stripeEventId: event.id, reason: "refund_reversal", maximumCredits: Math.max(1, maximum) });
+    const maximum = revocableCreditsForRefund({ grantCredits, refundAmount: refund.amount, chargedAmount: intent.amount });
+
+    // A refund too small to be worth a credit revokes none. The reversal
+    // function rejects a non-positive maximum, so the caller does not call it.
+    if (maximum === 0) return owner.userId;
+    await reversePurchaseCredits({ stripeObjectId: paymentIntentId, stripeEventId: event.id, reason: "refund_reversal", maximumCredits: maximum });
     return owner.userId;
   }
 

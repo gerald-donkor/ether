@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --import tsx --test tests/*.test.ts",
+    "test": "node --conditions=react-server --import tsx --test tests/*.test.ts",
     "test:db": "dotenv -e .env.local -- node --conditions=react-server --import tsx tests/moderation-db.integration.ts",
     "test:billing-db": "dotenv -e .env.local -- node --conditions=react-server --import tsx tests/billing-db.integration.ts",
     "db:generate": "drizzle-kit generate",
