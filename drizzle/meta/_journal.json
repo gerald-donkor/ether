@@ -50,6 +50,20 @@
       "when": 1786660200546,
       "tag": "0006_careful_sphinx",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786695979659,
+      "tag": "0007_stiff_luke_cage",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786696142773,
+      "tag": "0008_nosy_doctor_octopus",
+      "breakpoints": true
     }
   ]
 }

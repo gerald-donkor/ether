@@ -236,6 +236,12 @@ The authenticated shell uses a compact 64px header over `--container`, with the
 wordmark left and `Generate`, `Library`, `Account`, and the Clerk user control right. It
 has no marketing footer.
 
+`/account` extends its existing section stack with one billing group below
+generation usage. It uses the same top border, 22px/30px section title, 12px
+uppercase labels, 15px/26px body copy, statistic treatment, and pill controls.
+Checkout and billing management leave the site for Stripe-hosted surfaces.
+There is no pricing dashboard, new radius, new colour, or motion.
+
 `/generate` is a single form-led column. The title and promoted prompt field
 establish the action, followed by a result region and a three-column history
 grid that collapses to two columns and then one. Generated-image cards use

@@ -718,6 +718,9 @@ across production, preview, and development:
 | `NEXT_PUBLIC_CLERK_SIGN_IN_URL` | Yes | Local sign-in route |
 | `NEXT_PUBLIC_CLERK_SIGN_UP_URL` | Yes | Local sign-up route |
 | `VERCEL_OIDC_TOKEN` | No | Managed by Vercel. No longer read for generation |
+| `STRIPE_SECRET_KEY` | No | Stripe sandbox server API credential, Development and Preview |
+| `STRIPE_WEBHOOK_SECRET` | No | Stripe webhook signature verification, pending deployment setup |
+| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Yes | Marketplace-provisioned sandbox identifier; not read by Ether |
 
 Set by hand, not provisioned. Cloudflare is not a Vercel Marketplace
 integration, so neither name comes from a provider and both are this project's
@@ -1606,3 +1609,140 @@ workspace does not have. Specifically not exercised:
   deletion. The guarded `updateTag` and `revalidatePath` branch is the same one
   `deleteGeneration` uses, and there is no way to watch `unstable_cache` expire
   from outside.
+
+## Hybrid billing and credits, prompt 025
+
+### Commercial and provider contract
+
+The approved sandbox catalog is USD only. Ether Studio is $15 monthly for 200
+credits. The one-time pack is $10 for 100 credits. Both closed image models cost
+one credit per delivered image. New owners receive ten credits once, with no
+renewal and no expiry. Subscription credits expire at the next paid period and
+are spent before perpetual top-up credits. A cancelled subscription remains
+usable through its paid period. Provider failure, prompt refusal, output
+refusal, storage failure, and record failure release the affected credit, so a
+partial request spends only for rows actually delivered.
+
+Refunds revoke only the unspent proportional part of the associated top-up.
+Spent credits are not refunded except where law requires. A dispute revokes the
+remaining associated grant and places paid generation on hold until Stripe
+closes it. Existing images remain readable. Stripe Tax is disabled because no
+launch country or tax registration was approved. Live mode and Production are
+out of scope.
+
+Vercel Marketplace provisioned the unclaimed Stripe sandbox resource
+`ir_PYuEEjYG2hRdWIxF` as `ether-stripe-sandbox`, connected to Development and
+Preview only. The installed SDK is `stripe` 22.5.0 and the client pins API
+version `2026-07-29.dahlia`. It reads `STRIPE_SECRET_KEY` lazily. Checkout uses
+dynamic payment methods, hosted subscription and payment Sessions, and the
+hosted Customer Portal. The actual Vercel integration also exposes
+`NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_PUBLISHABLE_KEY`, and
+`STRIPE_MCP_KEY`; application code uses none of them.
+
+The verified test-mode catalog is:
+
+| offer | Product | Price | lookup key | value |
+| --- | --- | --- | --- | --- |
+| Ether Studio | `prod_V4PB2EttLPmgGx` | `price_1U4GMqBm5a4nTCBVKiPHN9Fq` | `ether_studio_monthly_v1` | USD 1500 minor units, monthly, 200 credits |
+| 100 credit top-up | `prod_V4PBL5euGAM89d` | `price_1U4GMtBm5a4nTCBVU7MV6DaE` | `ether_top_up_100_v1` | USD 1000 minor units, one-time, 100 credits |
+
+Both Prices were read back active, `livemode: false`, with closed version,
+offer, kind, and credit metadata. Code resolves them by lookup key and verifies
+all of those facts before opening Checkout or accepting a grant.
+
+### Stripe request paths
+
+`lib/billing/stripe.ts` is the single lazy SDK boundary.
+`lib/billing/catalog.ts` owns the closed server catalog. The three account
+Server Actions accept only an offer key, derive the owner from Clerk, derive the
+origin from trusted request headers, and accept only Stripe-hosted HTTPS return
+URLs. A SHA-256 owner key and Stripe idempotency key prevent duplicate Customer
+creation without sending an email or raw Clerk id in Customer metadata.
+
+`POST /api/stripe/webhook` is Node.js and force-dynamic. It reads the raw body,
+verifies `stripe-signature` with the lazily read `STRIPE_WEBHOOK_SECRET`, and
+handles Checkout completion, asynchronous payment success, subscription
+create/update/delete, paid invoices, refunds, and dispute create/close. It
+claims every event before work, returns success for duplicates, and can reclaim
+a processing claim after 15 minutes. Logs contain event id, event type, and an
+error name only. Checkout return query strings are acknowledgement states and
+never grant credits.
+
+No webhook endpoint or signing secret was created during this local-only run.
+The new handler is not deployed, and the approved sandbox credentials are not
+connected to Production, so pointing Stripe at the existing Production URL
+would create a knowingly broken destination. Create the sandbox destination
+and set `STRIPE_WEBHOOK_SECRET` in Development and Preview when a deployment of
+this commit exists, then run the provider end-to-end matrix before enabling it.
+
+### Schema and ledger
+
+Migrations `0007_stiff_luke_cage.sql` and
+`0008_nosy_doctor_octopus.sql` add six tables and six PostgreSQL functions.
+`billing_customers` maps one Clerk owner to one unique Stripe Customer.
+`billing_subscriptions` stores the closed status, one allowlisted Price, item
+period bounds, cancellation flag, and provider event time used to reject
+out-of-order regression. `billing_holds` stores dispute state.
+`billing_webhook_events` stores only event identity, type, processing state,
+owner, timestamps, and an error category. `credit_reservations` stores the
+operation id, requested and settled integer credits, status, and a 15-minute
+recovery bound. `credit_ledger` is append-only: positive grants and compensating
+debits or releases link to their grant, operation, and provider references.
+
+The ledger reasons are `starter_grant`, `subscription_grant`, `top_up_grant`,
+`generation_reservation`, `generation_release`, `subscription_expiry`,
+`refund_reversal`, and `dispute_reversal`. Partial unique indexes make a
+provider purchase object and each reservation allocation idempotent. Checks
+require positive reservations, nonnegative settlement, and nonzero ledger
+deltas. No balance is stored or updated.
+
+`reconcile_credit_balance` takes an owner advisory lock, grants the one-time
+starter allowance idempotently, releases stale reservations, and appends
+subscription expiry rows. `read_credit_balance` sums the ledger.
+`reserve_generation_capacity` combines the same owner lock with the existing
+global quota lock, dispute hold, hourly limit, daily provider ceiling, durable
+usage event, reservation, and earliest-expiry-first grant allocation in one
+database transaction. `settle_generation_credits` releases the undelivered
+portion once. Purchase grants and reversals are provider-object and event
+idempotent. The 15-minute recovery bound exceeds the five-minute Vercel
+function ceiling while limiting stranded credit time after termination.
+
+Account export is version 2 and includes owner-filtered billing customer,
+subscription, reservation, and ledger data. Account deletion removes the
+Stripe Customer after Blob cleanup and before local billing rows, application
+rows, and the Clerk identity. Stripe failure keeps local records and identity
+so the operation is retryable.
+
+### Verification
+
+- Catalog readback returned both expected test Products and immutable Prices,
+  active and not live.
+- `npm run db:generate` reported ten tables and produced migrations 0007 and
+  0008. `npm run db:migrate` reported `migrations applied successfully!`.
+- A read-only database inspection found all six tables, all six functions, and
+  16 indexes across the billing and credit tables.
+- `npm run lint` completed with no diagnostics.
+- `npm test` covers the closed billing offer, event, and metadata schemas in
+  addition to moderation. `npm run test:billing-db` passed its concurrency,
+  owner isolation, partial settlement, duplicate grant, and duplicate reversal
+  assertions. `npm run test:db` passed the existing moderation and quota suite.
+- The environment-present `npm run build` compiled, completed TypeScript,
+  generated 18 static pages, kept every existing route mode, and added only the
+  dynamic `/api/stripe/webhook` route.
+- A detached `4928213` baseline built with Next.js's documented webpack
+  fallback. After removing scripts and normalising only bundler-specific font,
+  stylesheet, and icon asset names, the complete server-rendered landing
+  documents were both 60,912 bytes and `diff` returned `IDENTICAL`.
+- The successful build's client output contained zero exact-name hits for all
+  Stripe server credentials, database credentials, Blob, and Cloudflare
+  secrets. `CLERK_SECRET_KEY` had the documented SDK name-only hit. Every
+  exact secret-value scan returned zero.
+- The environment-absent Turbopack build passed after removing a stale generated
+  `.next` cache and allowing the existing Google font fetch. It compiled,
+  completed TypeScript, generated all 18 static pages, and printed the expected
+  handled public-gallery and Community database fallback messages. `.env.local`
+  was restored and confirmed present.
+- Stripe sandbox Checkout, webhook delivery, portal, cancellation, refund,
+  dispute, duplicate replay, and authenticated keyboard/mobile checks were not
+  run because this commit has no deployed Preview handler or configured signing
+  secret. They remain the activation gate described above.

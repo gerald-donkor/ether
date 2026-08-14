@@ -32,6 +32,9 @@ The application reads these variables:
 - `NEXT_PUBLIC_CLERK_SIGN_UP_URL`: `/sign-up`.
 - `CLOUDFLARE_ACCOUNT_ID`: server-side Workers AI account identifier.
 - `CLOUDFLARE_API_TOKEN`: server-side Workers AI authentication.
+- `STRIPE_SECRET_KEY`: server-side Stripe sandbox API credential.
+- `STRIPE_WEBHOOK_SECRET`: server-side signing secret for `/api/stripe/webhook`.
+- `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`: public Stripe sandbox identifier provisioned by Vercel.
 
 `.env.local` is ignored by Git. Do not commit provider credentials.
 
@@ -46,6 +49,7 @@ capacity. The application reserves that capacity before making a model call.
 - `npm run lint`: run ESLint.
 - `npm test`: run environment-free moderation parser and validation tests.
 - `npm run test:db`: run moderation and quota integration checks with `.env.local`.
+- `npm run test:billing-db`: run credit-ledger integration checks with `.env.local`.
 - `npm run db:generate`: generate a migration from the Drizzle schema.
 - `npm run db:migrate`: apply committed migrations with `.env.local` loaded.
 - `npm run db:push`: apply the Drizzle schema with `.env.local` loaded.

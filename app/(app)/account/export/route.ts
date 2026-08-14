@@ -26,7 +26,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** Bumped when the payload's shape changes, so an old file stays legible. */
-const EXPORT_VERSION = 1;
+const EXPORT_VERSION = 2;
 
 export async function GET() {
   // The owner comes from the session. There is no query parameter naming a
@@ -114,6 +114,7 @@ export async function GET() {
       category: report.category,
       createdAt: report.createdAt.toISOString(),
     })),
+    billing: data.billing,
   };
 
   const filename = `ether-export-${generatedAt.toISOString().slice(0, 10)}.json`;

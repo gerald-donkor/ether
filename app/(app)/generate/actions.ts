@@ -17,7 +17,10 @@ import {
   createGeneration,
   PUBLIC_GENERATIONS_TAG,
 } from "@/lib/db/queries";
-import { reserveGenerationQuota } from "@/lib/db/quotas";
+import {
+  reserveGenerationCapacity,
+  settleGenerationCredits,
+} from "@/lib/db/billing";
 import type { GenerationVisibility } from "@/lib/generations/visibility";
 import {
   deleteGenerationImage,
@@ -102,11 +105,14 @@ export async function generateGeneration(
   const providerUnits =
     PROMPT_MODERATION_PROVIDER_UNITS +
     (model.providerUnitsPerImage + IMAGE_MODERATION_PROVIDER_UNITS) * count;
-  const quota = await reserveGenerationQuota({
+  const operationId = crypto.randomUUID();
+  const quota = await reserveGenerationCapacity({
     userId,
+    operationId,
     model: modelId,
     imageCount: count,
     providerUnits,
+    creditCost: model.creditCostPerImage,
   });
 
   if (quota.status === "account_limit") {
@@ -122,17 +128,23 @@ export async function generateGeneration(
     return failure("The generator's daily capacity has been reached.");
   }
 
+  if (quota.status === "insufficient_credits") {
+    return failure("You do not have enough credits for this request.");
+  }
+
   if (quota.status === "unavailable") {
     return failure("Usage could not be checked. Try again shortly.");
   }
 
   const promptDecision = await screenPrompt(prompt);
   if (promptDecision.status === "unsafe") {
+    await settleGenerationCredits(operationId, 0);
     return failure(
       "This prompt cannot be used. Revise it and remove unsafe content.",
     );
   }
   if (promptDecision.status === "unavailable") {
+    await settleGenerationCredits(operationId, 0);
     return failure("The prompt could not be checked. Try again later.");
   }
 
@@ -233,6 +245,7 @@ export async function generateGeneration(
   }
 
   if (generations.length === 0) {
+    await settleGenerationCredits(operationId, 0);
     return {
       ok: false,
       error: lastError ?? "No image could be generated. Try again.",
@@ -241,9 +254,15 @@ export async function generateGeneration(
     };
   }
 
+  await settleGenerationCredits(
+    operationId,
+    generations.length * model.creditCostPerImage,
+  );
+
   // Nothing was written on a total failure, so the revalidation only runs when
   // at least one row exists to show. Once, not once per image.
   revalidatePath("/generate");
+  revalidatePath("/account");
 
   // A private generation changes nothing anyone else can see, so the marketing
   // route is left alone. Only a published one expires the gallery's cached

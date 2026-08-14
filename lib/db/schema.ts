@@ -1,8 +1,10 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   index,
   integer,
+  type AnyPgColumn,
   pgEnum,
   pgTable,
   uniqueIndex,
@@ -26,6 +28,37 @@ export const reportResult = pgEnum("report_result", [
   "pending",
   "no_action",
   "takedown",
+]);
+
+export const billingSubscriptionStatus = pgEnum("billing_subscription_status", [
+  "incomplete",
+  "incomplete_expired",
+  "trialing",
+  "active",
+  "past_due",
+  "canceled",
+  "unpaid",
+  "paused",
+]);
+export const creditReservationStatus = pgEnum("credit_reservation_status", [
+  "reserved",
+  "settled",
+  "released",
+]);
+export const creditLedgerReason = pgEnum("credit_ledger_reason", [
+  "starter_grant",
+  "subscription_grant",
+  "top_up_grant",
+  "generation_reservation",
+  "generation_release",
+  "subscription_expiry",
+  "refund_reversal",
+  "dispute_reversal",
+]);
+export const billingWebhookStatus = pgEnum("billing_webhook_status", [
+  "processing",
+  "processed",
+  "failed",
 ]);
 
 export const generations = pgTable(
@@ -180,8 +213,115 @@ export const userPreferences = pgTable(
   ],
 );
 
+export const billingCustomers = pgTable(
+  "billing_customers",
+  {
+    userId: text("user_id").primaryKey(),
+    stripeCustomerId: text("stripe_customer_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("billing_customers_stripe_customer_idx").on(table.stripeCustomerId)],
+);
+
+export const billingSubscriptions = pgTable(
+  "billing_subscriptions",
+  {
+    stripeSubscriptionId: text("stripe_subscription_id").primaryKey(),
+    userId: text("user_id").notNull(),
+    stripeCustomerId: text("stripe_customer_id").notNull(),
+    stripePriceId: text("stripe_price_id").notNull(),
+    status: billingSubscriptionStatus("status").notNull(),
+    currentPeriodStart: timestamp("current_period_start", { withTimezone: true }).notNull(),
+    currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }).notNull(),
+    cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+    providerEventCreatedAt: timestamp("provider_event_created_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("billing_subscriptions_user_idx").on(table.userId),
+    index("billing_subscriptions_customer_idx").on(table.stripeCustomerId),
+  ],
+);
+
+export const billingHolds = pgTable(
+  "billing_holds",
+  {
+    stripeDisputeId: text("stripe_dispute_id").primaryKey(),
+    userId: text("user_id").notNull(),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  },
+  (table) => [index("billing_holds_user_active_idx").on(table.userId, table.active)],
+);
+
+export const creditReservations = pgTable(
+  "credit_reservations",
+  {
+    id: uuid("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    requestedCredits: integer("requested_credits").notNull(),
+    settledCredits: integer("settled_credits"),
+    status: creditReservationStatus("status").notNull().default("reserved"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("credit_reservations_user_status_idx").on(table.userId, table.status),
+    check("credit_reservations_requested_positive", sql`${table.requestedCredits} > 0`),
+    check("credit_reservations_settled_nonnegative", sql`${table.settledCredits} is null or ${table.settledCredits} >= 0`),
+  ],
+);
+
+export const creditLedger = pgTable(
+  "credit_ledger",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id").notNull(),
+    delta: integer("delta").notNull(),
+    reason: creditLedgerReason("reason").notNull(),
+    grantId: uuid("grant_id").references((): AnyPgColumn => creditLedger.id),
+    reservationId: uuid("reservation_id").references(() => creditReservations.id, { onDelete: "cascade" }),
+    stripeEventId: text("stripe_event_id"),
+    stripeObjectId: text("stripe_object_id"),
+    checkoutSessionId: text("checkout_session_id"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("credit_ledger_user_created_idx").on(table.userId, table.createdAt),
+    index("credit_ledger_grant_idx").on(table.grantId),
+    uniqueIndex("credit_ledger_purchase_object_idx")
+      .on(table.stripeObjectId)
+      .where(sql`${table.reason} in ('starter_grant', 'subscription_grant', 'top_up_grant')`),
+    uniqueIndex("credit_ledger_reservation_grant_reason_idx").on(table.reservationId, table.grantId, table.reason),
+    check("credit_ledger_delta_nonzero", sql`${table.delta} <> 0`),
+  ],
+);
+
+export const billingWebhookEvents = pgTable(
+  "billing_webhook_events",
+  {
+    stripeEventId: text("stripe_event_id").primaryKey(),
+    type: text("type").notNull(),
+    status: billingWebhookStatus("status").notNull().default("processing"),
+    userId: text("user_id"),
+    errorCategory: text("error_category"),
+    eventCreatedAt: timestamp("event_created_at", { withTimezone: true }).notNull(),
+    attemptedAt: timestamp("attempted_at", { withTimezone: true }).notNull().defaultNow(),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("billing_webhook_events_user_idx").on(table.userId)],
+);
+
 export type Generation = typeof generations.$inferSelect;
 export type NewGeneration = typeof generations.$inferInsert;
 export type UsageEvent = typeof usageEvents.$inferSelect;
 export type Report = typeof reports.$inferSelect;
 export type UserPreferences = typeof userPreferences.$inferSelect;
+export type BillingCustomer = typeof billingCustomers.$inferSelect;
+export type BillingSubscription = typeof billingSubscriptions.$inferSelect;

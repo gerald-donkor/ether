@@ -3,6 +3,12 @@ import "server-only";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "./index";
 import {
+  billingCustomers,
+  billingHolds,
+  billingSubscriptions,
+  billingWebhookEvents,
+  creditLedger,
+  creditReservations,
   generations,
   reports,
   usageEvents,
@@ -121,8 +127,14 @@ export async function ownerHasPublicGeneration(userId: string) {
 export async function purgeOwnerData(userId: string) {
   const db = getDb();
 
-  const [deletedGenerations, deletedUsage, deletedPreferences, deletedReports] =
+  const [deletedLedger, deletedReservations, deletedSubscriptions, deletedHolds, deletedWebhooks, deletedCustomer, deletedGenerations, deletedUsage, deletedPreferences, deletedReports] =
     await db.batch([
+      db.delete(creditLedger).where(eq(creditLedger.userId, userId)).returning({ id: creditLedger.id }),
+      db.delete(creditReservations).where(eq(creditReservations.userId, userId)).returning({ id: creditReservations.id }),
+      db.delete(billingSubscriptions).where(eq(billingSubscriptions.userId, userId)).returning({ id: billingSubscriptions.stripeSubscriptionId }),
+      db.delete(billingHolds).where(eq(billingHolds.userId, userId)).returning({ id: billingHolds.stripeDisputeId }),
+      db.delete(billingWebhookEvents).where(eq(billingWebhookEvents.userId, userId)).returning({ id: billingWebhookEvents.stripeEventId }),
+      db.delete(billingCustomers).where(eq(billingCustomers.userId, userId)).returning({ id: billingCustomers.userId }),
       db
         .delete(generations)
         .where(eq(generations.userId, userId))
@@ -142,6 +154,12 @@ export async function purgeOwnerData(userId: string) {
     ]);
 
   return {
+    creditLedger: deletedLedger.length,
+    creditReservations: deletedReservations.length,
+    billingSubscriptions: deletedSubscriptions.length,
+    billingHolds: deletedHolds.length,
+    billingWebhookEvents: deletedWebhooks.length,
+    billingCustomers: deletedCustomer.length,
     generations: deletedGenerations.length,
     usageEvents: deletedUsage.length,
     preferences: deletedPreferences.length,
@@ -172,6 +190,12 @@ export type AccountExportData = {
   }[];
   preferences: UserPreferences | null;
   reportsFiled: { category: string; createdAt: Date }[];
+  billing: {
+    customer: { stripeCustomerId: string; createdAt: Date; updatedAt: Date } | null;
+    subscriptions: (typeof billingSubscriptions.$inferSelect)[];
+    reservations: (typeof creditReservations.$inferSelect)[];
+    ledger: (typeof creditLedger.$inferSelect)[];
+  };
 };
 
 /**
@@ -191,7 +215,7 @@ export async function readAccountExport(
 ): Promise<AccountExportData> {
   const db = getDb();
 
-  const [generationRows, usageRows, preferenceRows, reportRows] =
+  const [generationRows, usageRows, preferenceRows, reportRows, customerRows, subscriptionRows, reservationRows, ledgerRows] =
     await db.batch([
       db
         .select({
@@ -234,6 +258,10 @@ export async function readAccountExport(
         .from(reports)
         .where(eq(reports.reporterUserId, userId))
         .orderBy(asc(reports.createdAt)),
+      db.select({ stripeCustomerId: billingCustomers.stripeCustomerId, createdAt: billingCustomers.createdAt, updatedAt: billingCustomers.updatedAt }).from(billingCustomers).where(eq(billingCustomers.userId, userId)).limit(1),
+      db.select().from(billingSubscriptions).where(eq(billingSubscriptions.userId, userId)).orderBy(desc(billingSubscriptions.createdAt)),
+      db.select().from(creditReservations).where(eq(creditReservations.userId, userId)).orderBy(desc(creditReservations.createdAt)),
+      db.select().from(creditLedger).where(eq(creditLedger.userId, userId)).orderBy(desc(creditLedger.createdAt)),
     ]);
 
   return {
@@ -241,5 +269,6 @@ export async function readAccountExport(
     usageEvents: usageRows,
     preferences: preferenceRows[0] ?? null,
     reportsFiled: reportRows,
+    billing: { customer: customerRows[0] ?? null, subscriptions: subscriptionRows, reservations: reservationRows, ledger: ledgerRows },
   };
 }

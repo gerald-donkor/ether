@@ -12,6 +12,7 @@ import {
 } from "@/lib/db/account";
 import { PUBLIC_GENERATIONS_TAG } from "@/lib/db/queries";
 import { deleteGenerationImages } from "@/lib/storage/generations";
+import { deleteStripeCustomerForOwner } from "@/lib/billing/customer";
 import {
   DELETE_ACCOUNT_CONFIRM_FIELD,
   deleteAccountSchema,
@@ -157,6 +158,13 @@ export async function deleteAccount(
       error:
         "Your images could not be removed, so nothing was deleted. Try again.",
     };
+  }
+
+  try {
+    await deleteStripeCustomerForOwner(userId);
+  } catch (error) {
+    console.error("Stripe customer deletion failed.", errorName(error));
+    return { ok: false, error: "Your billing account could not be removed, so your records were kept. Try again." };
   }
 
   // f. The rows, in one batched transaction.

@@ -44,6 +44,8 @@ export type ImageModel = {
   responseStyle: "json-base64" | "binary";
   /** Hundredths of a neuron reserved before one provider call. */
   providerUnitsPerImage: number;
+  /** Product credit charged only when an image is delivered. */
+  creditCostPerImage: number;
 };
 
 /** The smallest integer scale that represents every verified catalog cost. */
@@ -75,6 +77,7 @@ export const IMAGE_MODELS: Readonly<Record<ImageModelId, ImageModel>> = {
     bodyStyle: "prompt-steps",
     responseStyle: "json-base64",
     providerUnitsPerImage: 17280,
+    creditCostPerImage: 1,
     sizes: [
       { key: "square", label: "Square, 1024 x 1024", width: 1024, height: 1024 },
     ],
@@ -103,6 +106,7 @@ export const IMAGE_MODELS: Readonly<Record<ImageModelId, ImageModel>> = {
     bodyStyle: "prompt-dimensions",
     responseStyle: "binary",
     providerUnitsPerImage: 0,
+    creditCostPerImage: 1,
     sizes: [
       { key: "square", label: "Square, 1024 x 1024", width: 1024, height: 1024 },
       {

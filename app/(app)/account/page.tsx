@@ -2,10 +2,13 @@ import { UserButton } from "@clerk/nextjs";
 import { currentUser } from "@clerk/nextjs/server";
 import { DeleteAccountForm } from "@/components/app/DeleteAccountForm";
 import { GenerationDefaultsForm } from "@/components/app/GenerationDefaultsForm";
+import { BillingPanel } from "@/components/app/BillingPanel";
 import { Container } from "@/components/ui/Container";
 import { requireUserId } from "@/lib/auth";
 import { PROVIDER_UNITS_PER_NEURON } from "@/lib/ai/catalog";
 import { getPreferencesForOwner } from "@/lib/db/account";
+import { getBillingCatalog, formatOfferAmount } from "@/lib/billing/catalog";
+import { getBillingCustomerForOwner, readBillingSummary } from "@/lib/db/billing";
 import { readOwnerUsageSummary } from "@/lib/db/quotas";
 import { countGenerationsForUser } from "@/lib/db/queries";
 import { resolveGenerationChoice } from "@/lib/generations/choice";
@@ -29,13 +32,17 @@ function formatImageCount(count: number) {
   return `${count} ${count === 1 ? "image" : "images"}`;
 }
 
-export default async function AccountPage() {
+export default async function AccountPage({ searchParams }: { searchParams: Promise<{ billing?: string }> }) {
   const userId = await requireUserId();
-  const [user, generationCount, usage, preferences] = await Promise.all([
+  const [user, generationCount, usage, preferences, billing, billingCustomer, catalogResult, params] = await Promise.all([
     currentUser(),
     countGenerationsForUser(userId),
     readOwnerUsageSummary(userId),
     getPreferencesForOwner(userId),
+    readBillingSummary(userId),
+    getBillingCustomerForOwner(userId),
+    getBillingCatalog().catch(() => null),
+    searchParams,
   ]);
 
   const initialChoice = resolveGenerationChoice(
@@ -160,6 +167,24 @@ export default async function AccountPage() {
               Usage unavailable
             </p>
           )}
+        </section>
+
+        <section aria-labelledby="billing-title" className="border-line mt-12 border-t pt-8">
+          <h2 id="billing-title" className="text-text text-[22px] leading-[30px]">Billing and credits</h2>
+          <p className="text-text-2 mt-3 max-w-[62ch] text-[15px] leading-[26px]">
+            Subscription credits are used first and expire at renewal. Top-up credits do not expire.
+          </p>
+          <dl className="mt-8">
+            <div>
+              <dt className="text-text-3 text-[12px] font-medium tracking-[0.12em] uppercase">Available credits</dt>
+              <dd className="text-grad-stat mt-3 text-[40px] leading-none">{billing.credits}</dd>
+            </div>
+            {billing.subscription ? <div className="mt-8"><dt className="text-text-3 text-[12px] font-medium tracking-[0.12em] uppercase">Subscription</dt><dd className="text-text mt-3 text-[15px] leading-[26px]">{billing.subscription.status}{billing.subscription.cancelAtPeriodEnd ? ". Cancels at the end of the paid period." : `. Renews ${new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(billing.subscription.currentPeriodEnd)}.`}</dd></div> : null}
+          </dl>
+          <p aria-live="polite" className="text-text-2 mt-6 text-[14px] leading-[26px]">
+            {params.billing === "confirmed" ? "Payment received. Credits appear after confirmation." : params.billing === "cancelled" ? "Checkout was cancelled. No credits were added." : null}
+          </p>
+          {catalogResult ? <BillingPanel offers={catalogResult.map((offer) => ({ ...offer, amount: formatOfferAmount(offer) }))} hasCustomer={Boolean(billingCustomer)} /> : <p className="text-text-2 mt-6 text-[15px] leading-[26px]">Billing options are unavailable. Try again shortly.</p>}
         </section>
 
         <section
