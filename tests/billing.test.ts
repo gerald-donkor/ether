@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import {
   billingEventTypeSchema,
   billingOfferSchema,
+  checkoutSessionMarkerSchema,
   stripeCatalogMetadataSchema,
 } from "../lib/validation/billing";
 import {
   BILLING_SUBSCRIPTION_STATUSES,
+  ENDED_SUBSCRIPTION_STATUSES,
+  hasLiveSubscription,
   isPendingPeriodEndCancellation,
   isProvisionableStatus,
   revocableCreditsForRefund,
@@ -100,4 +103,40 @@ test("a refund revokes the floored proportional part and never more than the gra
   assert.equal(revocableCreditsForRefund({ grantCredits: 100, refundAmount: -500, chargedAmount: 1000 }), 0);
   assert.equal(revocableCreditsForRefund({ grantCredits: 100, refundAmount: 1500, chargedAmount: 1000 }), 100);
   assert.equal(revocableCreditsForRefund({ grantCredits: Number.NaN, refundAmount: 500, chargedAmount: 1000 }), 0);
+});
+
+test("a Checkout Session is ours only when it carries a known offer marker", () => {
+  // What the app's own Sessions carry. Stripe may add metadata of its own, so
+  // the schema reads the marker rather than owning the whole object.
+  assert.equal(checkoutSessionMarkerSchema.safeParse({ ether_offer_key: "top_up_100" }).success, true);
+  assert.equal(checkoutSessionMarkerSchema.safeParse({ ether_offer_key: "studio_monthly", something_else: "x" }).success, true);
+
+  // A `stripe trigger` Session, and anything else that is not ours. Each of
+  // these is ignored with a 200 instead of failing the webhook.
+  assert.equal(checkoutSessionMarkerSchema.safeParse({}).success, false);
+  assert.equal(checkoutSessionMarkerSchema.safeParse(null).success, false);
+  assert.equal(checkoutSessionMarkerSchema.safeParse({ ether_offer_key: "" }).success, false);
+
+  // An offer key that is not in the closed list is not ours either, which is
+  // why this reads the enum rather than checking the key is present.
+  assert.equal(checkoutSessionMarkerSchema.safeParse({ ether_offer_key: "top_up_500" }).success, false);
+});
+
+test("a subscription is live until it is canceled or expired before it started", () => {
+  // The set the Checkout action refuses on and the set /account hides the
+  // control on are the same set, read from one place.
+  assert.deepEqual([...ENDED_SUBSCRIPTION_STATUSES], ["canceled", "incomplete_expired"]);
+  for (const status of ENDED_SUBSCRIPTION_STATUSES) {
+    assert.equal(hasLiveSubscription(status), false);
+  }
+  for (const status of BILLING_SUBSCRIPTION_STATUSES) {
+    const ended = ENDED_SUBSCRIPTION_STATUSES.some((candidate) => candidate === status);
+    assert.equal(hasLiveSubscription(status), !ended);
+  }
+
+  // No stored subscription at all is the case a new owner is in, and it must
+  // read as subscribable rather than as live.
+  assert.equal(hasLiveSubscription(undefined), false);
+  assert.equal(hasLiveSubscription(null), false);
+  assert.equal(hasLiveSubscription(""), false);
 });

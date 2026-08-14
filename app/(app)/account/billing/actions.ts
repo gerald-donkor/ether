@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { checkoutIntegrationIdentifier, getOrCreateStripeCustomer } from "@/lib/billing/customer";
 import { getBillingOffer } from "@/lib/billing/catalog";
+import { hasLiveSubscription } from "@/lib/billing/events";
 import { getStripe } from "@/lib/billing/stripe";
 import { billingOfferSchema } from "@/lib/validation/billing";
 import { readBillingSummary } from "@/lib/db/billing";
@@ -36,7 +37,7 @@ async function startCheckout(formData: FormData, expected: "subscription" | "top
     if (offer.kind !== expected) return { ok: false as const, error: "That billing option is unavailable." };
     if (expected === "subscription") {
       const current = await readBillingSummary(userId);
-      if (current.subscription && !["canceled", "incomplete_expired"].includes(current.subscription.status)) {
+      if (hasLiveSubscription(current.subscription?.status)) {
         return { ok: false as const, error: "Manage your current subscription instead." };
       }
     }

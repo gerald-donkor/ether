@@ -59,6 +59,26 @@ export function isProvisionableStatus(status: string) {
 }
 
 /**
+ * The statuses that leave nothing to manage: the subscription is over, or it
+ * never started. Every other status is a subscription the customer still has,
+ * whether or not it is currently paying.
+ *
+ * One list, two readers. The Checkout action refuses a second subscription
+ * while one of the others is stored, and `/account` stops offering the control
+ * on the same condition. The refusal is the enforcement and stays where it is;
+ * hiding the control is presentation (`AGENTS.md` §6.2, §11 rule 2).
+ */
+export const ENDED_SUBSCRIPTION_STATUSES = [
+  "canceled",
+  "incomplete_expired",
+] as const satisfies readonly BillingSubscriptionStatus[];
+
+export function hasLiveSubscription(status: string | null | undefined) {
+  if (!status) return false;
+  return !ENDED_SUBSCRIPTION_STATUSES.some((candidate) => candidate === status);
+}
+
+/**
  * Whether a subscription has a cancellation pending at the end of the period
  * the customer has already paid for.
  *

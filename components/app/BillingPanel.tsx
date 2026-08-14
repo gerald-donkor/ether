@@ -35,8 +35,11 @@ function OfferForm({ offer, label }: { offer: DisplayOffer; label: string }) {
   );
 }
 
-export function BillingPanel({ offers, hasCustomer }: { offers: DisplayOffer[]; hasCustomer: boolean }) {
-  const subscription = offers.find((offer) => offer.kind === "subscription");
+export function BillingPanel({ offers, hasCustomer, canSubscribe }: { offers: DisplayOffer[]; hasCustomer: boolean; canSubscribe: boolean }) {
+  // An owner who already has a subscription is offered the top-up and the
+  // portal, not a second copy of what they are already paying for. The action
+  // refuses it either way; this only stops the page offering it.
+  const subscription = canSubscribe ? offers.find((offer) => offer.kind === "subscription") : undefined;
   const topUp = offers.find((offer) => offer.kind === "top_up");
   return (
     <div className="mt-8 grid gap-8 sm:grid-cols-2">

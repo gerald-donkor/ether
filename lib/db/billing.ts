@@ -258,14 +258,45 @@ export async function failBillingWebhook(id: string, category: string) {
     .where(eq(billingWebhookEvents.stripeEventId, id));
 }
 
-export async function setBillingHold(input: { stripeDisputeId: string; userId: string; active: boolean }) {
+export async function setBillingHold(input: {
+  stripeDisputeId: string;
+  userId: string;
+  active: boolean;
+  stripePaymentIntentId?: string;
+}) {
   await getDb().insert(billingHolds).values({
     stripeDisputeId: input.stripeDisputeId,
     userId: input.userId,
+    stripePaymentIntentId: input.stripePaymentIntentId ?? null,
     active: input.active,
     resolvedAt: input.active ? null : new Date(),
   }).onConflictDoUpdate({
     target: billingHolds.stripeDisputeId,
-    set: { active: input.active, resolvedAt: input.active ? null : new Date() },
+    set: {
+      active: input.active,
+      resolvedAt: input.active ? null : new Date(),
+      // `coalesce(excluded, existing)` rather than a plain overwrite: a later
+      // event that could not resolve the payment must not erase one an earlier
+      // event did resolve.
+      stripePaymentIntentId: sql`coalesce(excluded.stripe_payment_intent_id, ${billingHolds.stripePaymentIntentId})`,
+    },
   });
+}
+
+/**
+ * Every dispute recorded against a payment, oldest first.
+ *
+ * This is what makes the grant path order-independent: a `charge.dispute.*`
+ * event that arrived before its grant wrote a hold row and no ledger row,
+ * because `reverse_purchase_credits` returns 0 when no grant exists yet. The
+ * grant path replays the reversal for whatever this returns, keyed on the
+ * dispute id, so the reversal happens exactly once whichever order they land in.
+ */
+export async function getDisputesForPaymentIntent(stripePaymentIntentId: string) {
+  const rows = await getDb()
+    .select({ stripeDisputeId: billingHolds.stripeDisputeId })
+    .from(billingHolds)
+    .where(eq(billingHolds.stripePaymentIntentId, stripePaymentIntentId))
+    .orderBy(billingHolds.createdAt);
+  return rows.map((row) => row.stripeDisputeId);
 }

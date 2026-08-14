@@ -22,6 +22,19 @@ export const BILLING_EVENT_TYPES = [
 
 export const billingEventTypeSchema = z.enum(BILLING_EVENT_TYPES);
 
+/**
+ * The marker every Checkout Session this app creates carries in its own
+ * metadata, and the only thing that makes a Session ours.
+ *
+ * Not strict, because Stripe may add metadata of its own and because the
+ * subscription path sets the same marker on `subscription_data` as well. A
+ * Session without it is somebody else's, including one made by
+ * `stripe trigger`, and the webhook ignores it rather than failing on it.
+ */
+export const checkoutSessionMarkerSchema = z.object({
+  ether_offer_key: z.enum(BILLING_OFFER_KEYS),
+});
+
 export const stripeCatalogMetadataSchema = z.strictObject({
   ether_catalog_version: z.literal("v1"),
   ether_offer_key: z.enum(BILLING_OFFER_KEYS),

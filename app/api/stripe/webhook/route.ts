@@ -11,6 +11,7 @@ import {
   claimBillingWebhook,
   completeBillingWebhook,
   failBillingWebhook,
+  getDisputesForPaymentIntent,
   getOwnerForStripeCustomer,
   getPurchaseGrantCredits,
   grantPurchaseCredits,
@@ -18,10 +19,18 @@ import {
   setBillingHold,
   upsertBillingSubscription,
 } from "@/lib/db/billing";
-import { billingEventTypeSchema, stripeCatalogMetadataSchema } from "@/lib/validation/billing";
+import { billingEventTypeSchema, checkoutSessionMarkerSchema, stripeCatalogMetadataSchema } from "@/lib/validation/billing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/**
+ * A dispute takes back the whole payment, so the reversal's ceiling is only
+ * there because `reverse_purchase_credits` rejects a non-positive maximum. The
+ * function itself caps the revocation at whatever the grant has left unspent.
+ * This is the largest `integer` PostgreSQL accepts for that argument.
+ */
+const DISPUTE_REVOKES_EVERYTHING = 2147483647;
 
 function id(value: string | { id: string } | null | undefined) {
   return typeof value === "string" ? value : value?.id;
@@ -69,6 +78,14 @@ async function applyEvent(event: Stripe.Event) {
   if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
     const session = event.data.object;
     if (session.mode !== "payment" || session.payment_status !== "paid") return undefined;
+
+    // "Not ours" and "ours and broken" are different answers. Every Session
+    // this app creates sets `ether_offer_key` in its own metadata, so a Session
+    // without a valid one is somebody else's and is ignored with a 200. A
+    // Session that carries the marker and then fails still throws, because that
+    // is a misconfiguration and swallowing it would hide it.
+    if (!checkoutSessionMarkerSchema.safeParse(session.metadata).success) return undefined;
+
     const lineItems = await stripe.checkout.sessions.listLineItems(session.id, { limit: 2 });
     const linePriceId = lineItems.data[0]?.price?.id;
     if (!linePriceId || lineItems.data.length !== 1 || lineItems.data[0]?.quantity !== 1) throw new Error("Invalid top-up line items");
@@ -79,6 +96,14 @@ async function applyEvent(event: Stripe.Event) {
     const paymentIntent = id(session.payment_intent);
     if (!paymentIntent || offer.kind !== "top_up" || offer.priceId !== linePriceId) throw new Error("Invalid top-up Checkout");
     await grantPurchaseCredits({ ...owner, credits: offer.credits, reason: "top_up_grant", stripeEventId: event.id, stripeObjectId: paymentIntent, checkoutSessionId: session.id });
+
+    // A dispute delivered before this grant wrote a hold and no ledger row,
+    // because `reverse_purchase_credits` finds no grant and returns 0. Replay
+    // it now that the grant exists. Keyed on the dispute id, so it collides
+    // with the dispute handler's own reversal and lands exactly once.
+    for (const disputeId of await getDisputesForPaymentIntent(paymentIntent)) {
+      await reversePurchaseCredits({ stripeObjectId: paymentIntent, stripeEventId: disputeId, reason: "dispute_reversal", maximumCredits: DISPUTE_REVOKES_EVERYTHING });
+    }
     return owner.userId;
   }
 
@@ -130,11 +155,19 @@ async function applyEvent(event: Stripe.Event) {
   if (!paymentIntentId) return undefined;
   const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
   const owner = await ownerFor(intent.customer);
+
+  // Recorded before the reversal is attempted, and that order is the fix. If
+  // the grant is still in flight this row is what its own path will find; if
+  // the grant has already landed, the reversal below writes the row itself.
+  // Either way the dispute is durable against the payment.
+  await setBillingHold({ stripeDisputeId: dispute.id, userId: owner.userId, active: event.type === "charge.dispute.created", stripePaymentIntentId: paymentIntentId });
+
+  // Keyed on `dispute.id`, not `event.id`. `du_…` is the one identifier both
+  // this handler and the grant path can derive, so the existing
+  // `stripe_event_id` dedupe in `reverse_purchase_credits` makes the two paths
+  // idempotent against each other with no new function and no new column.
   if (event.type === "charge.dispute.created") {
-    await reversePurchaseCredits({ stripeObjectId: paymentIntentId, stripeEventId: event.id, reason: "dispute_reversal", maximumCredits: 2147483647 });
-    await setBillingHold({ stripeDisputeId: dispute.id, userId: owner.userId, active: true });
-  } else {
-    await setBillingHold({ stripeDisputeId: dispute.id, userId: owner.userId, active: false });
+    await reversePurchaseCredits({ stripeObjectId: paymentIntentId, stripeEventId: dispute.id, reason: "dispute_reversal", maximumCredits: DISPUTE_REVOKES_EVERYTHING });
   }
   return owner.userId;
 }

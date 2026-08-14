@@ -8,6 +8,7 @@ import { requireUserId } from "@/lib/auth";
 import { PROVIDER_UNITS_PER_NEURON } from "@/lib/ai/catalog";
 import { getPreferencesForOwner } from "@/lib/db/account";
 import { getBillingCatalog, formatOfferAmount } from "@/lib/billing/catalog";
+import { hasLiveSubscription } from "@/lib/billing/events";
 import { getBillingCustomerForOwner, readBillingSummary } from "@/lib/db/billing";
 import { readOwnerUsageSummary } from "@/lib/db/quotas";
 import { countGenerationsForUser } from "@/lib/db/queries";
@@ -184,7 +185,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
           <p aria-live="polite" className="text-text-2 mt-6 text-[14px] leading-[26px]">
             {params.billing === "confirmed" ? "Payment received. Credits appear after confirmation." : params.billing === "cancelled" ? "Checkout was cancelled. No credits were added." : null}
           </p>
-          {catalogResult ? <BillingPanel offers={catalogResult.map((offer) => ({ ...offer, amount: formatOfferAmount(offer) }))} hasCustomer={Boolean(billingCustomer)} /> : <p className="text-text-2 mt-6 text-[15px] leading-[26px]">Billing options are unavailable. Try again shortly.</p>}
+          {catalogResult ? <BillingPanel offers={catalogResult.map((offer) => ({ ...offer, amount: formatOfferAmount(offer) }))} hasCustomer={Boolean(billingCustomer)} canSubscribe={!hasLiveSubscription(billing.subscription?.status)} /> :<p className="text-text-2 mt-6 text-[15px] leading-[26px]">Billing options are unavailable. Try again shortly.</p>}
         </section>
 
         <section

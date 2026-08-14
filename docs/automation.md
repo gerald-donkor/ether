@@ -357,3 +357,45 @@ el.dispatchEvent(new Event('input', { bubbles: true }));
 `1.33333px` at a 0.75 `devicePixelRatio` is the 2px rule in `app/globals.css`,
 not a different one. Compare the colour, `rgb(210, 255, 58)`, and check
 `outlineOffset` scales with it by the same factor.
+
+### Replay an event the handler already processed
+
+Worked out at prompt 028 and used four times in that one session, so it is
+captured (§3). `stripe events resend` alone does **not** re-run the handler for
+an event already in `billing_webhook_events` as `processed`: `claimBillingWebhook`
+short-circuits at the claim and answers 200 having done nothing. That is correct
+behaviour and it is exactly what makes a replay test look like a pass.
+
+Put the one row back to `failed` first, which is the state `claimBillingWebhook`
+already reclaims immediately, then resend:
+
+```ts
+await sql`update billing_webhook_events set status = 'failed',
+          error_category = 'replay' where stripe_event_id = ${EVENT}`;
+```
+
+```bash
+stripe events resend "$EVENT" --api-key "$STRIPE_SECRET_KEY" > /dev/null
+```
+
+**Say in the record that you did this.** It is a write to application state made
+to enable a test, and a run that hides it is claiming a replay it did not do.
+
+Replaying a `charge.dispute.created` reopens the hold, so a dispute that was
+genuinely closed needs its `charge.dispute.closed` replayed after it or the
+account is left held by the test rather than by Stripe.
+
+### Trigger a foreign event that still looks like ours
+
+To exercise the "carries our marker but the app cannot resolve it" branch
+without a browser Checkout, add the marker to a fixture:
+
+```bash
+stripe trigger checkout.session.completed --api-key "$STRIPE_SECRET_KEY" \
+  --add "checkout_session:metadata[ether_offer_key]=top_up_100"
+```
+
+`--add` takes `resource:field=value` and nested metadata in bracket form. Read
+the event back with `stripe events retrieve` and confirm the metadata actually
+landed **before** asserting anything about the status code, or the test proves
+only that an unmarked fixture behaves like an unmarked fixture.

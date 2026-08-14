@@ -1,0 +1,2 @@
+ALTER TABLE "billing_holds" ADD COLUMN "stripe_payment_intent_id" text;--> statement-breakpoint
+CREATE INDEX "billing_holds_payment_intent_idx" ON "billing_holds" USING btree ("stripe_payment_intent_id");

@@ -2082,3 +2082,178 @@ dispute would be a new commercial rule.
   a test clock and a Customer created against it, which hosted Checkout does not
   give us. Named as a gap rather than faked.
 - **The two-account boundary through the browser**, per M11.
+
+## Dispute ordering and the rest of the 027 findings, prompt 028
+
+Prompt 027 left four things open. All four are closed here, at the option the
+user chose on 2026-08-14. Nothing below is new product surface: every item is a
+defect or a decision that 027 demonstrated against the live sandbox.
+
+### The schema change
+
+`billing_holds` gains one column and one index, migration
+`drizzle/0010_messy_silver_sable.sql`:
+
+```sql
+ALTER TABLE "billing_holds" ADD COLUMN "stripe_payment_intent_id" text;
+CREATE INDEX "billing_holds_payment_intent_idx" ON "billing_holds" USING btree ("stripe_payment_intent_id");
+```
+
+Nullable, because the one row that predates it could not be backfilled from the
+table. It is populated in practice: the replay in item 3 filled the existing row
+with `pi_3U4JXhBm5a4nTCBV3GjK4c7g`, so no null remains in the dev database.
+
+### Item 1 — a dispute delivered before its grant now still revokes
+
+**The mechanism, read from `pg_proc.prosrc` on 2026-08-14 rather than assumed.**
+`reverse_purchase_credits` opens with
+
+```
+SELECT * INTO "v_grant" FROM credit_ledger WHERE stripe_object_id = "p_object_id"
+  AND reason IN ('subscription_grant','top_up_grant') FOR UPDATE;
+IF NOT FOUND THEN RETURN 0; END IF;
+```
+
+so a dispute that arrives first revokes nothing and reports success. Its
+idempotency is `IF "v_revoke" > 0 AND NOT EXISTS (SELECT 1 FROM credit_ledger
+WHERE stripe_event_id = "p_event_id")`, and **the dedupe key is whatever the
+caller passes.** That is the whole hinge of the fix.
+
+Three changes, no new database function and no change to that function's body:
+
+1. **The dispute reversal is keyed on `dispute.id`, not `event.id`.** `du_…` is
+   the one identifier both the dispute handler and the grant path can derive, so
+   the existing `stripe_event_id` dedupe makes the two paths idempotent against
+   each other for free. Keyed on `event.id` they could not be, because the grant
+   path does not have the dispute's event id.
+2. **The hold is recorded before the reversal is attempted**, and it now carries
+   the PaymentIntent. `charge.dispute.closed` records it too, so a dispute first
+   seen at close is still durable; that branch still writes no ledger row.
+   `setBillingHold`'s upsert uses `coalesce(excluded.stripe_payment_intent_id,
+   billing_holds.stripe_payment_intent_id)`, so an event that cannot resolve the
+   payment never erases one that could.
+3. **The top-up grant path replays whatever is recorded**, through
+   `getDisputesForPaymentIntent`, immediately after `grantPurchaseCredits`
+   succeeds. One indexed query on a table with one row.
+
+**Scoped to top-up grants, deliberately.** Subscription grants are keyed on the
+invoice id (correction 2), and the recorded policy scopes reversal to the
+associated top-up, so a dispute on a subscription invoice finds no grant by
+design. That is existing recorded behaviour, not something this prompt changed.
+
+**One consequence worth naming.** The replay does not filter on `active`, so a
+dispute whose only delivered event was `charge.dispute.closed` will also be
+replayed once its grant lands. That follows the recorded rule, "a dispute
+revokes the unspent grant and a close restores nothing", rather than departing
+from it, but it is a case the close branch could not previously reach at all.
+
+**Dispute id stability was not taken on faith.** `stripe docs api dispute`, read
+2026-08-14, gives `id` as the Dispute's own identifier and
+`charge.dispute.closed` as an event whose `data.object` is that same dispute
+with a changed `status`. The 027 matrix already proved it empirically: M7c's
+close event cleared the hold keyed on the `du_…` written by M7a's created event.
+
+### Item 2 — a foreign Checkout Session now answers 200
+
+Every Session this app creates sets `metadata: { ether_offer_key: offer.key }`
+in `app/(app)/account/billing/actions.ts`. The handler now validates that marker
+with `checkoutSessionMarkerSchema` against the existing `BILLING_OFFER_KEYS`
+enum, before it makes any Stripe call:
+
+- no valid marker: **200, ignored, no work.** It is not ours.
+- our marker present and the work then fails: **still 500.** That is a genuine
+  misconfiguration and swallowing it is exactly what should not happen.
+
+This is a **tightening** of the trust boundary, not a loosening: the handler now
+requires its own marker before treating a Session as a purchase.
+
+### Item 3 — the leftover ledger state is corrected
+
+Replayed through the fixed code against the real event, rather than compensated
+with a hand-written SQL row. `evt_1U4JXjBm5a4nTCBVKzwFsz9Z` was already
+`processed`, so a resend short-circuits at the claim; its one dev row was set
+back to `failed`, which `claimBillingWebhook` reclaims immediately. That is
+stated here rather than done quietly.
+
+The ledger now holds exactly one `dispute_reversal`, `-100`, keyed on
+`du_1U4JXiBm5a4nTCBV8ADfC0Pl` against `pi_3U4JXhBm5a4nTCBV3GjK4c7g`, and the
+balance is **238** where 027 left it at 338. The 238 rather than 239 is the
+second generation M7c ran, exactly as the prompt predicted.
+
+### Item 4 — Subscribe is no longer offered to an active subscriber
+
+`ENDED_SUBSCRIPTION_STATUSES` in `lib/billing/events.ts` is now the one list,
+read by both the Checkout action and `/account`. `hasLiveSubscription` is its
+reader. **The action's refusal is untouched** and remains the enforcement;
+hiding the control is presentation only (`AGENTS.md` §6.2, §11 rule 2).
+
+### Verified against the live sandbox, 2026-08-14
+
+The forwarder ran as in 027, `stripe listen --forward-to
+localhost:3000/api/stripe/webhook` with `--api-key "$STRIPE_SECRET_KEY"`, API
+version `2026-07-29.dahlia`. Every line below was observed.
+
+| what | result |
+| --- | --- |
+| M10 replayed, `evt_1U4JeDBm5a4nTCBVADKmnxQm` | **200** where 027 got 500. Row `processed`, `error_category` null, `user_id` null, **zero** ledger rows, balance unchanged at 338. Item 2's first half |
+| the M7a dispute replayed, `evt_1U4JXjBm5a4nTCBVKzwFsz9Z` | 200. Hold gained `pi_3U4JXhBm5a4nTCBV3GjK4c7g`, one `dispute_reversal` of `-100` keyed on `du_1U4JXiBm5a4nTCBV8ADfC0Pl`, balance **338 → 238**. Item 1 and item 3, on the exact data that exposed the defect |
+| the grant event replayed after that, `evt_1U4JXjBm5a4nTCBVXWDHs0Ap` | 200. The new grant-path replay ran live against an already-reversed dispute and wrote **nothing further**: still exactly one reversal, still 238. This is the exactly-once guarantee, measured |
+| the close event replayed, `evt_1U4Jc2Bm5a4nTCBVldZuJueT` | 200. Hold inactive with `resolved_at` set, PaymentIntent **retained** through the `coalesce`, no ledger row. Restores the dispute's true end state |
+| `stripe trigger checkout.session.completed --add "checkout_session:metadata[ether_offer_key]=top_up_100"` | **500**, row `failed`. The event was confirmed to carry `metadata: {"ether_offer_key": "top_up_100"}` before the assertion was made. Item 2's second half |
+| `/account` on the dev owner, whose subscription is `active` | **No `Subscribe` control.** Buttons are the user menu, `Buy credits`, `Manage billing`, `Save defaults`, `Delete account`; credits `238`; "active. Cancels at the end of the paid period."; **zero** positive `tabindex` anywhere, so DOM order is still tab order as M12 recorded |
+
+**Which direction was covered how, stated rather than blurred** (§12 rule 3).
+The dispute-**before**-grant direction was proved end to end against Stripe, on
+the original event. The dispute-**after**-grant direction was **not** forced
+through a fresh hosted Checkout: that needs a second card entry in the browser,
+which is a prohibited action for the implementing agent. It is covered two other
+ways, and both were run: the grant-event replay above exercises the new
+grant-path code against a recorded dispute live, and
+`tests/billing-db.integration.ts` asserts both orderings directly against the
+database, each ending at exactly one `-100` reversal keyed on the dispute id.
+
+### Checks
+
+- `npm run db:generate` produced `drizzle/0010_messy_silver_sable.sql`;
+  `npm run db:migrate` applied it successfully.
+- `npm run lint` completed with no diagnostics.
+- `npm test`: 12 tests, 12 pass, 0 fail, up from 10.
+- `npm run test:db`: 1 test, 1 pass.
+- `npm run test:billing-db`: 5 tests, 5 pass, up from 3.
+- `npm run build` compiled, completed TypeScript and generated 18 static pages.
+  Its route table `diff` against a stashed baseline returned `IDENTICAL`: 22
+  routes, unchanged modes, `/api/stripe/webhook` still dynamic.
+- The prerendered `/` comparison returned `IDENTICAL`, both documents **125,912
+  bytes**, the same length prompts 026 and 027 recorded.
+- The environment-absent build passed and produced the same 22-route table.
+  `.env.local` was restored and confirmed present with `STRIPE_WEBHOOK_SECRET`
+  still in it.
+- The client bundle scan returned zero exact-name hits for every secret except
+  the one documented `CLERK_SECRET_KEY` SDK name-only hit, and **zero by value
+  for all eleven**, including `STRIPE_WEBHOOK_SECRET` and
+  `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`.
+
+No environment variable was added, so the `AGENTS.md` §8.4 table is unchanged.
+
+### Still open, and deliberately not decided here
+
+**1. The per-refund proportional floor.** Many sub-credit refunds can each floor
+to zero and cumulatively return real money while revoking no credits. M6a
+demonstrated the floor working as recorded, twice, on 9-unit refunds of a 1000
+charge. Accumulating the unrevoked remainder across refunds would be a **new
+commercial rule**, not a bug fix, so it is carried forward rather than chosen.
+
+**2. The dispute-won rule**, unchanged from 026 and 027. `charge.dispute.closed`
+lifts the hold for every outcome and restores no credits. Restoring them on a
+won dispute would be a new commercial rule.
+
+**3. The same ordering race on `refund.created`, named rather than left to be
+rediscovered.** It has the identical `RETURN 0` shape. It is not fixed here
+because a refund cannot be created before its payment succeeds, so the grant is
+normally already written, and item 1's machinery does not generalise to it
+without recording refunds too.
+
+**4. Everything 027 listed as not closed** is still not closed: live mode and
+Production, `STRIPE_WEBHOOK_SECRET` in the Vercel project and a Dashboard
+endpoint, renewal and credit expiry across a period boundary, and the two-account
+boundary through the browser.

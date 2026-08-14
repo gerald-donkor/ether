@@ -250,11 +250,18 @@ export const billingHolds = pgTable(
   {
     stripeDisputeId: text("stripe_dispute_id").primaryKey(),
     userId: text("user_id").notNull(),
+    // The payment the dispute is against, so a grant that lands *after* its
+    // dispute can find it and replay the reversal. Nullable because the one
+    // row that predates this column cannot be backfilled from the table.
+    stripePaymentIntentId: text("stripe_payment_intent_id"),
     active: boolean("active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
   },
-  (table) => [index("billing_holds_user_active_idx").on(table.userId, table.active)],
+  (table) => [
+    index("billing_holds_user_active_idx").on(table.userId, table.active),
+    index("billing_holds_payment_intent_idx").on(table.stripePaymentIntentId),
+  ],
 );
 
 export const creditReservations = pgTable(
