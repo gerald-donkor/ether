@@ -1924,7 +1924,7 @@ so every row below was created by the matrix.
 | M7c | **pass** | `stripe disputes close` produced `status: lost`, `charge.dispute.closed` delivered and 200, the hold cleared with `resolved_at` set, and a generation succeeded again. The dispute-won policy was **not** changed and is restated as open below |
 | M8 | **pass** | No `stripe-signature` returned `400 {"error":"Missing signature"}`; a forged one returned `400 {"error":"Invalid signature"}`. **Zero** `billing_webhook_events` rows for either id |
 | M9 | **pass** | `stripe trigger customer.updated` answered 200 and wrote no row. Six further unmodelled types arrived naturally during the matrix, `customer.created`, `charge.succeeded`, `charge.updated`, `payment_intent.created`, `payment_intent.succeeded`, `invoice.finalized`, `invoice.created`, `invoice.payment_succeeded`, `invoice_payment.paid`, `payment_method.attached` and `charge.dispute.funds_withdrawn`, every one 200 in 4 to 15ms with no row, because the event-type schema rejects before the claim |
-| M10 | **the predicted finding, confirmed** | `stripe trigger checkout.session.completed` answered **500** and recorded `status: failed`, `error_category: Error`, `user_id: null`. Stripe will retry it for three days, and the 15 minute reclaim means each retry re-attempts and re-fails. Needs a decision, below |
+| M10 | **the predicted finding, confirmed** | `stripe trigger checkout.session.completed` answered **500** and recorded `status: failed`, `error_category: Error`, `user_id: null`. It was delivered **once and never retried**, because `stripe listen` is a CLI stream and not a registered endpoint. What a retry would do is reasoned, not observed, and is separated out below. Needs a decision |
 | M11 | **not run** | Running it requires creating a second Clerk identity or entering a second identity's password, and both are prohibited actions for the implementing agent regardless of authorisation. The two-account boundary therefore still has never been exercised through the browser, as prompt 016 already recorded. It **is** covered at the layer that decides it: `npm run test:billing-db` asserts owner isolation directly against the database |
 | M12 | **pass** | The billing controls are reachable in DOM order, user menu then Subscribe then Buy credits then Manage billing, and **no positive `tabindex` exists anywhere on the page**, so DOM order is tab order. All three billing controls resolve `solid rgb(210, 255, 58)` under `:focus-visible` at an offset scaling with the width, which is the `2px solid var(--color-lime)` at `2px` in `app/globals.css` lines 90 and 91, reported as its used value under the browser's 0.75 `devicePixelRatio`. The pending state replaces the label in place inside a fixed `364px 364px` grid, so the pressed pill widens and `min-h-11` fixes the height: no sibling and no following row moved |
 
@@ -2029,19 +2029,42 @@ this prompt's scope or changes behaviour that is not mine to choose:
 
 - Throwing on a missing grant so Stripe retries cannot distinguish "no grant
   yet" from "no grant ever", and a dispute on a subscription invoice legitimately
-  has no PaymentIntent-keyed grant, so it would retry and fail for three days.
+  has no PaymentIntent-keyed grant, so it would fail every retry a registered
+  endpoint made. It also depends on retries this setup does not have, per the
+  M10 note below.
 - Checking the charge's `disputed` flag on the grant path costs a Stripe call on
   every top-up grant and only narrows the window rather than closing it.
 - Recording the dispute against the payment so the grant can reconcile in either
   order is the only order-independent fix, and it needs a schema change, which
   this prompt explicitly put out of scope.
 
-**2. M10: a foreign Checkout Session answers 500 and is retried for three days.**
+**2. M10: a foreign Checkout Session answers 500.**
 
-Confirmed exactly as prompt 027 predicted. Answering 200 and ignoring a session
-whose customer this database does not know is as much a policy as a bug fix,
-which is why it was not decided here: it is also the branch that would hide a
-genuine misconfiguration, such as the webhook pointed at the wrong sandbox.
+Confirmed exactly as prompt 027 predicted, and the 500 itself was observed.
+
+**What follows from it was reasoned, not observed, and the first version of this
+section overstated it.** Separating the two:
+
+- *Observed.* One delivery, `500`, one `failed` row. `stripe listen` forwarded
+  the event once and never again. A CLI listener is a stream, not a registered
+  endpoint, so no retry policy applied to this run at all.
+- *Documented.* `stripe docs /webhooks/process-undelivered-events`, read
+  2026-08-14: "If your webhook endpoint temporarily can't process events, Stripe
+  automatically resends the undelivered events to your endpoint for up to three
+  days." That is a property of a **registered endpoint**, which this project does
+  not have yet.
+- *Reasoned from the code, and worth knowing before one exists.*
+  `claimBillingWebhook` reclaims a `failed` row **immediately**: its condition is
+  `status = 'failed' or (status = 'processing' and attempted_at < now() -
+  interval '15 minutes')`, so the 15 minute bound covers only a stuck
+  `processing` row and does nothing to slow a retried failure. Once a Dashboard
+  destination exists, a foreign session would therefore be re-attempted and
+  re-fail on every retry for up to three days.
+
+Answering 200 and ignoring a session whose customer this database does not know
+is as much a policy as a bug fix, which is why it was not decided here: it is
+also the branch that would hide a genuine misconfiguration, such as the webhook
+pointed at the wrong sandbox.
 
 **3. The dispute-won rule is still open**, unchanged from prompt 026.
 `charge.dispute.closed` lifts the hold for every outcome and restores no
