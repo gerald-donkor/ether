@@ -7,6 +7,7 @@ import {
 } from "../lib/validation/billing";
 import {
   BILLING_SUBSCRIPTION_STATUSES,
+  isPendingPeriodEndCancellation,
   isProvisionableStatus,
   revocableCreditsForRefund,
   toBillingSubscriptionStatus,
@@ -55,6 +56,33 @@ test("only active and trialing subscriptions provision credits", () => {
   for (const status of ["incomplete", "incomplete_expired", "past_due", "canceled", "unpaid", "paused", "ended"]) {
     assert.equal(isProvisionableStatus(status), false, status);
   }
+});
+
+test("a pending cancellation is read from cancel_at as well as the boolean", () => {
+  const periodEnd = 1789384481;
+
+  // The boolean alone, which is what the documentation describes.
+  assert.equal(isPendingPeriodEndCancellation({ cancelAtPeriodEnd: true, cancelAt: null, currentPeriodEnd: periodEnd }), true);
+
+  // What the hosted Customer Portal actually produced on 2026-08-14: the
+  // boolean false, and cancel_at exactly equal to the item period end.
+  assert.equal(isPendingPeriodEndCancellation({ cancelAtPeriodEnd: false, cancelAt: periodEnd, currentPeriodEnd: periodEnd }), true);
+
+  // A cancellation earlier than the period end is still pending.
+  assert.equal(isPendingPeriodEndCancellation({ cancelAtPeriodEnd: false, cancelAt: periodEnd - 1, currentPeriodEnd: periodEnd }), true);
+
+  // No cancellation at all.
+  assert.equal(isPendingPeriodEndCancellation({ cancelAtPeriodEnd: false, cancelAt: null, currentPeriodEnd: periodEnd }), false);
+
+  // A future-dated cancellation beyond this period is not a period-end one.
+  assert.equal(isPendingPeriodEndCancellation({ cancelAtPeriodEnd: false, cancelAt: periodEnd + 1, currentPeriodEnd: periodEnd }), false);
+
+  // Malformed input never invents a cancellation.
+  assert.equal(isPendingPeriodEndCancellation({ cancelAtPeriodEnd: false, cancelAt: Number.NaN, currentPeriodEnd: periodEnd }), false);
+  assert.equal(isPendingPeriodEndCancellation({ cancelAtPeriodEnd: false, cancelAt: periodEnd, currentPeriodEnd: Number.NaN }), false);
+
+  // The boolean still wins outright, whatever the timestamps say.
+  assert.equal(isPendingPeriodEndCancellation({ cancelAtPeriodEnd: true, cancelAt: periodEnd + 1, currentPeriodEnd: periodEnd }), true);
 });
 
 test("a refund revokes the floored proportional part and never more than the grant", () => {

@@ -59,6 +59,40 @@ export function isProvisionableStatus(status: string) {
 }
 
 /**
+ * Whether a subscription has a cancellation pending at the end of the period
+ * the customer has already paid for.
+ *
+ * `Subscription.cancel_at_period_end` alone is not enough, and this is measured
+ * rather than assumed. On 2026-08-14, against API version `2026-07-29.dahlia`,
+ * cancelling through the hosted Customer Portal produced a subscription with
+ * `cancel_at_period_end: false`, `cancel_at` set to exactly the item's
+ * `current_period_end`, `canceled_at` set, and
+ * `cancellation_details.reason: "cancellation_requested"`. Reading only the
+ * boolean recorded that subscription as renewing, and `/account` told the
+ * customer "Renews" on the very date Stripe was going to cancel them.
+ *
+ * docs.stripe.com/billing/subscriptions/cancel, read the same day, still says
+ * the period-end path "is set to true", so the live provider disagrees with its
+ * own documentation here. Both signals are therefore read, and the absolute
+ * timestamp is trusted when the boolean is not set.
+ *
+ * A `cancel_at` beyond this item's period end is a future-dated cancellation,
+ * not a cancellation at the end of the current period, so it does not set the
+ * flag: the column keeps exactly the meaning its name and Stripe's own field
+ * description give it.
+ */
+export function isPendingPeriodEndCancellation(input: {
+  cancelAtPeriodEnd: boolean;
+  cancelAt: number | null;
+  currentPeriodEnd: number;
+}) {
+  if (input.cancelAtPeriodEnd) return true;
+  if (!Number.isSafeInteger(input.cancelAt)) return false;
+  if (!Number.isSafeInteger(input.currentPeriodEnd)) return false;
+  return (input.cancelAt as number) <= input.currentPeriodEnd;
+}
+
+/**
  * The credits a refund may revoke: the unspent proportional part of the
  * purchase, which is the rule `docs/backend.md` records.
  *

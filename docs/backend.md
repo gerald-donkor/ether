@@ -1872,3 +1872,190 @@ revokes the remaining grant and holds paid generation until Stripe closes the
 dispute. It does not say what happens when the dispute is *won*: today
 `charge.dispute.closed` lifts the hold for every outcome and restores no
 credits. Restoring them would be a new commercial rule, so it was not written.
+
+## Stripe activation and the provider matrix, prompt 027
+
+The activation gate recorded at the end of prompt 026 is closed. The Stripe CLI
+is installed, a signing secret exists, and the sandbox end-to-end matrix ran
+against the local dev server on 2026-08-14. Everything below was observed, not
+argued. Two defects were found; one is fixed here and one needs a decision and
+is stated at the end.
+
+### Setup, as it actually happened
+
+`npm install -g @stripe/cli` installed **1.50.0** into the user-owned prefix
+`/home/gdk26/.npm-global`, with no `sudo`. npm blocked the package's
+`postinstall` under this machine's `allowScripts` policy and the binary works
+regardless: `stripe version` reported `1.50.0`.
+
+**No `stripe login` was ever run.** Every command carried
+`--api-key "$STRIPE_SECRET_KEY"`, so the CLI and the application provably
+addressed the same sandbox. That was proved rather than assumed before anything
+else ran: `stripe prices retrieve price_1U4GMqBm5a4nTCBVKiPHN9Fq` returned
+`livemode: false`, `active: true`, `lookup_key: ether_studio_monthly_v1`,
+`unit_amount: 1500`, `recurring.interval: month`, product
+`prod_V4PB2EttLPmgGx` and metadata `ether_credits: 200`,
+`ether_offer_key: studio_monthly`, `ether_kind: subscription`,
+`ether_catalog_version: v1`. That matches the catalog table above exactly.
+
+`stripe listen --print-secret` produced the signing secret, which was written
+into gitignored `.env.local` as `STRIPE_WEBHOOK_SECRET` and never printed. The
+forwarder reported API version `2026-07-29.dahlia`, the same version
+`lib/billing/stripe.ts` pins. `git check-ignore` confirms `.env.local` is still
+ignored, and it is **not** set in the Vercel project: no deployment of the
+webhook exists, so there is nothing there for it to authenticate.
+
+The database was empty across all six billing tables when the matrix started,
+so every row below was created by the matrix.
+
+### The matrix
+
+| # | result | what was observed |
+| --- | --- | --- |
+| M1 | **pass** | `checkout.session.completed` `evt_1U4J09Bm5a4nTCBVuU8Fezfu` delivered, answered 200 in 4.4s. Exactly one `top_up_grant` of `+100` keyed on PaymentIntent `pi_3U4J08Bm5a4nTCBV0IFNSom4`; one `billing_webhook_events` row, `processed`; `/account` showed `110`, being the `starter_grant` of 10 plus the top-up. The return landed on `/account?billing=confirmed` and granted nothing by itself |
+| M2 | **pass** | `stripe events resend` of the same event was forwarded and answered 200 in 1487ms, against 4.4s first time, because it short-circuits at the claim. The full six-table snapshot `diff` against the previous one returned nothing |
+| M3 | **pass** | `customer.subscription.created` and `invoice.paid` both delivered and 200. `billing_subscriptions` row `active` on `price_1U4GMqBm5a4nTCBVKiPHN9Fq`. One `subscription_grant` of `+200` keyed on **invoice `in_1U4J4PBm5a4nTCBVfkpZ9TKO`**, not a PaymentIntent, with `expires_at` equal to the item `current_period_end` to the second. Correction 2 executed against Stripe for the first time |
+| M4 | **pass** | Two real `customer.subscription.updated` payloads, `created` 1786706704 and 1786706755, re-delivered under fresh event ids so the claim did not short-circuit. Later first, then earlier: both 200, and `cancel_at_period_end` and `provider_event_created_at` were unchanged by the earlier one. The guard held |
+| M5 | **pass, after the fix below** | `openBillingPortal` redirected to `billing.stripe.com`. Cancelling produced `customer.subscription.updated`, and credits stayed spendable: a generation succeeded and spent one credit **from the subscription grant**, not from the perpetual top-up, which is the earliest-expiry-first rule executed against real purchased credits for the first time |
+| M6a | **pass** | Two refunds of 9 minor units each on a 1000 charge. `refund.created` delivered both times, and `floor(100 x 9 / 1000) = 0` wrote **zero** ledger rows. Balance unchanged. Correction 4 executed against Stripe |
+| M6b | **pass** | A 500 refund produced exactly one `refund_reversal` of `-50`. A third refund of 200 then produced exactly `-20`, computed from the original `+100` grant even though three rows now share that PaymentIntent and one is a negative reversal. Correction 1's regression, executed against Stripe |
+| M7a | **pass, with a defect exposed** | `4000000000000259` paid, then `charge.dispute.created` `reason: fraudulent` delivered and 200; `billing_holds` active. **No `dispute_reversal` was written.** See the open finding below |
+| M7b | **pass** | `reserve_generation_capacity` returned `outcome: billing_hold` with `credits_remaining: 339`, the real balance, and the ledger was unchanged by the refusal. `/generate` rendered one plain sentence: "This account is on hold while a payment dispute is open. Images you already made are unaffected." Correction 3 executed against a real dispute |
+| M7c | **pass** | `stripe disputes close` produced `status: lost`, `charge.dispute.closed` delivered and 200, the hold cleared with `resolved_at` set, and a generation succeeded again. The dispute-won policy was **not** changed and is restated as open below |
+| M8 | **pass** | No `stripe-signature` returned `400 {"error":"Missing signature"}`; a forged one returned `400 {"error":"Invalid signature"}`. **Zero** `billing_webhook_events` rows for either id |
+| M9 | **pass** | `stripe trigger customer.updated` answered 200 and wrote no row. Six further unmodelled types arrived naturally during the matrix, `customer.created`, `charge.succeeded`, `charge.updated`, `payment_intent.created`, `payment_intent.succeeded`, `invoice.finalized`, `invoice.created`, `invoice.payment_succeeded`, `invoice_payment.paid`, `payment_method.attached` and `charge.dispute.funds_withdrawn`, every one 200 in 4 to 15ms with no row, because the event-type schema rejects before the claim |
+| M10 | **the predicted finding, confirmed** | `stripe trigger checkout.session.completed` answered **500** and recorded `status: failed`, `error_category: Error`, `user_id: null`. Stripe will retry it for three days, and the 15 minute reclaim means each retry re-attempts and re-fails. Needs a decision, below |
+| M11 | **not run** | Running it requires creating a second Clerk identity or entering a second identity's password, and both are prohibited actions for the implementing agent regardless of authorisation. The two-account boundary therefore still has never been exercised through the browser, as prompt 016 already recorded. It **is** covered at the layer that decides it: `npm run test:billing-db` asserts owner isolation directly against the database |
+| M12 | **pass** | The billing controls are reachable in DOM order, user menu then Subscribe then Buy credits then Manage billing, and **no positive `tabindex` exists anywhere on the page**, so DOM order is tab order. All three billing controls resolve `solid rgb(210, 255, 58)` under `:focus-visible` at an offset scaling with the width, which is the `2px solid var(--color-lime)` at `2px` in `app/globals.css` lines 90 and 91, reported as its used value under the browser's 0.75 `devicePixelRatio`. The pending state replaces the label in place inside a fixed `364px 364px` grid, so the pressed pill widens and `min-h-11` fixes the height: no sibling and no following row moved |
+
+Synthetic `Tab` keypresses did not move focus through the browser extension, so
+M12's ordering was established from the DOM and the absence of `tabindex`
+overrides rather than by pressing Tab. Recorded as the method used, not as an
+equivalent.
+
+### The defect that was fixed
+
+**A cancellation through the hosted Customer Portal was recorded as a renewal.**
+
+`upsertBillingSubscription` took `cancelAtPeriodEnd` from
+`subscription.cancel_at_period_end` alone. Measured on 2026-08-14 against API
+version `2026-07-29.dahlia`, cancelling in the Portal produced a subscription
+with `cancel_at_period_end: false`, `cancel_at: 1789384481` equal to the item's
+`current_period_end` to the second, `canceled_at` set, and
+`cancellation_details.reason: "cancellation_requested"`. The boolean was false
+for a subscription that was genuinely cancelling.
+
+The user-visible consequence was verified, not inferred: `/account` rendered
+**"active. Renews Sep 14, 2026."** for a subscription Stripe was going to cancel
+on Sep 14, 2026. The page stated the opposite of the truth about the customer's
+own cancellation.
+
+**The live provider disagrees with its own documentation here**, and that is
+worth recording under §1 step 2b. `stripe docs /billing/subscriptions/cancel`,
+read the same day through the CLI, says of the period-end path "set
+`cancel_at_period_end` to true" and that `customer.subscription.updated` is
+"Sent for any subscription update, including when `cancel_at_period_end` is set
+to true". `stripe docs api subscription` still describes the field as "Whether
+this subscription will (if `status=active`) or did (if `status=canceled`) cancel
+at the end of the current billing period." The observed object contradicts all
+of that, so both signals are now read and the absolute timestamp is trusted when
+the boolean is not set. `Subscription.cancel_at` is `number | null` at
+`node_modules/stripe/esm/resources/Subscriptions.d.ts:130`.
+
+The fix is `isPendingPeriodEndCancellation` in `lib/billing/events.ts`, which is
+where correction 5 put the handler's pure decisions. A `cancel_at` beyond the
+current item period end is a future-dated cancellation and deliberately does
+**not** set the flag, so the column keeps exactly the meaning its name and
+Stripe's own field description give it. No commercial rule changed: "a cancelled
+subscription remains usable through its paid period" was already the rule and
+the column already existed to carry it.
+
+Verified against Stripe after the change: a fresh Portal cancellation set
+`cancel_at_period_end` to `true`, an intervening Portal renewal set it back to
+`false`, and a second cancellation set it to `true` again, so the flag tracks
+both directions. `/account` then rendered **"active. Cancels at the end of the
+paid period."** `npm test` gained ten assertions covering the boolean alone, the
+observed `cancel_at` case, a cancellation earlier than the period end, no
+cancellation, a future-dated one, malformed timestamps, and the boolean winning
+outright.
+
+### Verification
+
+- `npm run lint` completed with no diagnostics.
+- `npm test`: 10 tests, 10 pass, 0 fail.
+- `npm run test:db`: 1 test, 1 pass.
+- `npm run test:billing-db`: 3 tests, 3 pass.
+- `npm run build` compiled, completed TypeScript and generated 18 static pages.
+  Its route table `diff` against a stashed baseline of the same commit returned
+  `IDENTICAL`: 22 routes, unchanged modes, `/api/stripe/webhook` still dynamic.
+- The prerendered `/` comparison returned `IDENTICAL`, both documents 125,912
+  bytes, which is the same length prompt 026 recorded.
+- The environment-absent build passed after clearing `.next`, produced the same
+  22-route table, and `.env.local` was restored and confirmed present with
+  `STRIPE_WEBHOOK_SECRET` still in it.
+- The client bundle scan returned zero exact-name hits for `STRIPE_SECRET_KEY`,
+  `STRIPE_WEBHOOK_SECRET`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_MCP_KEY`,
+  `DATABASE_URL`, `DATABASE_URL_UNPOOLED`, `BLOB_READ_WRITE_TOKEN`,
+  `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`. `CLERK_SECRET_KEY` had the
+  one documented SDK name-only hit. Every exact secret-value scan returned zero,
+  including `STRIPE_WEBHOOK_SECRET` by value.
+
+### Two things to decide, not to invent
+
+**1. A dispute that arrives before its grant revokes nothing, permanently.**
+
+This is the M7a finding and it is a real money-loss path, demonstrated rather
+than theorised. The timeline, from the forwarder and the ledger:
+
+- 11:45:03.003 `charge.dispute.created` processed. The hold was set. The
+  `dispute_reversal` wrote **nothing**, because no grant existed for that
+  PaymentIntent yet, and `getPurchaseGrantCredits` returning nothing is a
+  handled outcome that answers 200.
+- 11:45:03.741 `checkout.session.completed` processed, writing `top_up_grant`
+  `+100` for that same disputed PaymentIntent.
+
+The owner kept 100 credits for a payment that was charged back, and the ledger
+ended at 339 where the recorded rule wants 239. The event is marked `processed`,
+so Stripe will never retry it and nothing will ever reconcile it.
+
+`4000000000000259` disputes immediately, which is not how real disputes arrive.
+The ordering hazard is not an artifact of that, though: Stripe does not
+guarantee event order, the grant path makes several Stripe calls and took 4.4s
+in M1 while the dispute took 3s, and any dispute delivered before or alongside
+its grant loses the revocation the same way.
+
+It is left unfixed because every mechanism that actually closes it is outside
+this prompt's scope or changes behaviour that is not mine to choose:
+
+- Throwing on a missing grant so Stripe retries cannot distinguish "no grant
+  yet" from "no grant ever", and a dispute on a subscription invoice legitimately
+  has no PaymentIntent-keyed grant, so it would retry and fail for three days.
+- Checking the charge's `disputed` flag on the grant path costs a Stripe call on
+  every top-up grant and only narrows the window rather than closing it.
+- Recording the dispute against the payment so the grant can reconcile in either
+  order is the only order-independent fix, and it needs a schema change, which
+  this prompt explicitly put out of scope.
+
+**2. M10: a foreign Checkout Session answers 500 and is retried for three days.**
+
+Confirmed exactly as prompt 027 predicted. Answering 200 and ignoring a session
+whose customer this database does not know is as much a policy as a bug fix,
+which is why it was not decided here: it is also the branch that would hide a
+genuine misconfiguration, such as the webhook pointed at the wrong sandbox.
+
+**3. The dispute-won rule is still open**, unchanged from prompt 026.
+`charge.dispute.closed` lifts the hold for every outcome and restores no
+credits. The dispute in M7c was `lost`, so restoration was not at issue and the
+question was not answered by running the matrix. Restoring credits on a won
+dispute would be a new commercial rule.
+
+### Still not closed
+
+- **Live mode and Production**, out of scope in 025 and still out of scope.
+- **`STRIPE_WEBHOOK_SECRET` in the Vercel project**, and a Dashboard endpoint.
+  `stripe listen` needed neither. Do this when a deployment of this commit
+  exists.
+- **Subscription renewal and credit expiry across a period boundary.** It needs
+  a test clock and a Customer created against it, which hosted Checkout does not
+  give us. Named as a gap rather than faked.
+- **The two-account boundary through the browser**, per M11.

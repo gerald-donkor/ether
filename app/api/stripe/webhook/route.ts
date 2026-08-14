@@ -1,6 +1,7 @@
 import type Stripe from "stripe";
 import { getBillingOffer } from "@/lib/billing/catalog";
 import {
+  isPendingPeriodEndCancellation,
   isProvisionableStatus,
   revocableCreditsForRefund,
   toBillingSubscriptionStatus,
@@ -53,7 +54,11 @@ async function syncSubscription(subscription: Stripe.Subscription, event: Stripe
     status,
     currentPeriodStart: new Date(item.current_period_start * 1000),
     currentPeriodEnd: new Date(item.current_period_end * 1000),
-    cancelAtPeriodEnd: subscription.cancel_at_period_end,
+    cancelAtPeriodEnd: isPendingPeriodEndCancellation({
+      cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      cancelAt: subscription.cancel_at,
+      currentPeriodEnd: item.current_period_end,
+    }),
     eventCreatedAt: new Date(event.created * 1000),
   });
   return { ...owner, offer, item, status };

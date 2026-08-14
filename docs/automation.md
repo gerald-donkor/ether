@@ -239,3 +239,121 @@ node_modules/.bin/dotenv -e .env.local -- node_modules/.bin/tsx /tmp/<check>.ts
 
 The test is not complete merely because its assertions passed. Cleanup is part
 of the check, and a failed cleanup is reported as a failure.
+
+## Run the Stripe sandbox matrix against the local dev server
+
+Worked out at prompt 025 as a plan and executed at prompt 027, which is the
+second time, so it is captured here (§3). This needs no Dashboard endpoint and
+no deployment: `stripe listen` is its own destination.
+
+```bash
+npm install -g @stripe/cli   # user-owned prefix, no sudo. postinstall is
+                             # blocked by npm policy and the binary still works
+```
+
+**Never `stripe login`.** An interactive login could select a different account
+than the application uses. Every command carries the key the app reads, so the
+CLI and the app are provably the same sandbox:
+
+```bash
+set -a && . ./.env.local && set +a
+stripe <command> --api-key "$STRIPE_SECRET_KEY"
+```
+
+Prove that before trusting it, by reading a catalog Price back and checking
+`livemode: false`, `active: true` and the expected lookup key against the
+catalog table in `docs/backend.md`.
+
+The signing secret is stable across restarts, so it is written once. Extract it
+without ever printing it, because the version-check banner goes to the same
+stream:
+
+```bash
+S=$(stripe listen --api-key "$STRIPE_SECRET_KEY" --print-secret 2>/dev/null \
+    | grep -oE 'whsec_[A-Za-z0-9]+' | head -1)
+printf 'STRIPE_WEBHOOK_SECRET="%s"\n' "$S" >> .env.local
+```
+
+Then run the dev server and the forwarder, both backgrounded with their output
+captured, and redact the secret out of anything you quote from the log:
+
+```bash
+npm run dev > dev.log 2>&1 &
+stripe listen --api-key "$STRIPE_SECRET_KEY" \
+  --forward-to http://localhost:3000/api/stripe/webhook > listen.log 2>&1 &
+sed -E 's/whsec_[A-Za-z0-9]+/whsec_<redacted>/g' listen.log
+```
+
+The forwarder's paired `-->` and `<-- [status]` lines are the delivery evidence,
+and the gap between them is the handler's real latency.
+
+### The assertion snapshot
+
+Use the read-only script pattern above, selecting **never** `prompt` and
+**never** `image_url`, and hash the Clerk owner id to a short tag before
+printing. Take a snapshot before the matrix and after every step, then `diff`
+consecutive snapshots so each assertion is about what changed. `diff` returning
+nothing is the whole proof for a replay test.
+
+The column names are not guessable from the table names. As of prompt 027 they
+are `credit_ledger.delta` (not `credits_delta`), `billing_webhook_events.type`
+(not `event_type`) with `event_created_at`, and
+`billing_subscriptions.provider_event_created_at`.
+
+### What a trigger can and cannot do
+
+- **`stripe trigger` objects belong to customers this database has never seen**,
+  so `ownerFor` throws for them. Triggers are negative tests only. Every
+  positive test goes through the application's own Checkout so the Customer,
+  the PaymentIntent and the ledger row belong to a real signed-in owner.
+- **`stripe trigger` cannot produce `refund.created` or
+  `charge.dispute.closed`.** Act on real objects instead:
+  `stripe refunds create --payment-intent <pi> --amount <minor>` and
+  `stripe disputes close <du>`.
+- **`stripe events resend <id>` cannot test an ordering guard.** The id is
+  already in `billing_webhook_events`, so the handler short-circuits at the
+  claim and never reaches the provider event time comparison. That resend tests
+  the *replay* path, which is a different thing. To reach the guard, re-deliver
+  the real payload under a fresh event id, signed with the SDK:
+
+```ts
+const payload = JSON.stringify({ ...source, id: `evt_test_${Date.now()}` });
+const header = await stripe.webhooks.generateTestHeaderStringAsync({ payload, secret });
+await fetch(endpoint, { method: "POST", body: payload,
+  headers: { "content-type": "application/json", "stripe-signature": header } });
+```
+
+Only the `id` is synthetic. Say so when recording the result.
+
+### Rejection tests need no CLI
+
+```bash
+curl -s -o /dev/stderr -w "status=%{http_code}\n" -X POST \
+  http://localhost:3000/api/stripe/webhook -H 'content-type: application/json' \
+  -d '{"id":"evt_forged","type":"invoice.paid","created":1,"livemode":false,"data":{"object":{}}}'
+```
+
+Expect `400 {"error":"Missing signature"}`, and `400
+{"error":"Invalid signature"}` when a made-up `stripe-signature` is added. Then
+assert **zero** `billing_webhook_events` rows for those ids: a rejected request
+must not claim an event.
+
+### Driving the forms in this app from the browser
+
+`form_input` sets the DOM value without React's `onChange`, so a controlled
+input stays empty and the action receives nothing. Synthetic `Tab` keypresses
+also did not move focus on 2026-08-14. Drive a controlled input through the
+native setter instead, and verify focus rings by calling `.focus()` and reading
+the computed style rather than by pressing Tab:
+
+```js
+const el = document.querySelector('input[name="prompt"]');
+Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
+  .set.call(el, 'the text');
+el.dispatchEvent(new Event('input', { bubbles: true }));
+```
+
+`outlineWidth` comes back as the **used** value, so browser zoom scales it:
+`1.33333px` at a 0.75 `devicePixelRatio` is the 2px rule in `app/globals.css`,
+not a different one. Compare the colour, `rgb(210, 255, 58)`, and check
+`outlineOffset` scales with it by the same factor.

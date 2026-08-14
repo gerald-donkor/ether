@@ -753,7 +753,7 @@ mishandling it is not recoverable.
   and the blob token before calling a backend step done.
 
 Variables in play, and the step that introduces each. All are server-only except
-the two Clerk publishable names:
+the two Clerk publishable names and `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`:
 
 | variable | step | source |
 | --- | --- | --- |
@@ -763,6 +763,9 @@ the two Clerk publishable names:
 | `VERCEL_OIDC_TOKEN` | 1 | Vercel. No longer read for generation after prompt 014 |
 | `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN` | prompt 014 | **ours, set by hand** in `.env.local` and in the Vercel project. The names are this project's choice; the REST API dictates neither (§12 rule 6) |
 | `NEXT_PUBLIC_CLERK_SIGN_IN_URL` / `..._SIGN_UP_URL` | 1 | **ours, set by hand** in `.env.local` and in the Vercel project |
+| `STRIPE_SECRET_KEY` | step 12, prompt 025 | Vercel Marketplace, auto-provisioned with the sandbox resource. The only Stripe variable application code reads |
+| `STRIPE_WEBHOOK_SECRET` | prompt 027 | **ours, set by hand** in `.env.local` from `stripe listen --print-secret`. Stable across restarts, so it is written once. Not set in the Vercel project, because no deployment of the webhook exists yet |
+| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` / `STRIPE_PUBLISHABLE_KEY` / `STRIPE_MCP_KEY` | step 12, prompt 025 | auto-provisioned alongside the resource. **No application code reads any of the three**, and the first is public by its prefix |
 
 Do not invent a variable name before the step that provisions it.
 
