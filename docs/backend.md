@@ -2568,3 +2568,212 @@ unchanged. The first two are decided, not bugs.
 of "scripts that currently exist in `package.json`" was missing
 `test:billing-db`, which prompt 027 added. Both it and the new `test:owner-db`
 are now listed.
+
+---
+
+## Prompt 031 — the production deployment, and a registered Stripe webhook
+
+Executed 2026-08-14. **No application code changed.** This prompt moved the
+production alias onto the current `main`, put the two Stripe variables the
+deployed code actually reads into Production, and turned `stripe listen` into a
+registered test-mode endpoint. It stays in test mode throughout.
+
+### What is deployed
+
+| fact | value |
+| --- | --- |
+| project | `ether`, `prj_WuHQTQwVWyda8rmWcKygCx48It2l`, team `team_zE3mp7nrEZ6a7cxRavwUMYC4` |
+| **Git-connected** | **yes** — settled here, which prompt 031 could not settle in advance. The project record's `link` is `{"type":"github","repo":"ether","org":"gerald-donkor","productionBranch":"main"}`. `vercel project inspect` prints no Git section, which is why it looked ambiguous; the project API answers it |
+| repo visibility | `githubRepoVisibility: "public"` — the GitHub repository is public |
+| deployment | `dpl_H5UZ7omZHHe8vLUvN2gQpZ2npFRs`, `ether-4s2h9vkpk-dgsloxx417s-projects.vercel.app` |
+| commit | `e243e9311365bd11255a71f6c1a143e9b45c4bb2`, branch `main` |
+| build | READY in **41s**, Turbopack, `nodejs` runtime |
+| aliases | `ether-bay.vercel.app`, `ether-dgsloxx417s-projects.vercel.app`, `ether-git-main-dgsloxx417s-projects.vercel.app` |
+| previous production | `dpl_6bx874BB3A49iBwfEX3hFSyn3qqn`, from `82f22b8`, two days old |
+
+The deploy path was the Git integration, not `vercel deploy --prod`: `git push
+origin main` moved the remote `82f22b8..e243e93` (19 commits, the 18 the prompt
+counted plus its own prompt-file commit) and Vercel built from the push.
+
+### The registered endpoint
+
+Created against the **v1 `webhook_endpoints`** surface, verified live on
+2026-08-14 via `stripe docs api POST /v1/webhook_endpoints` before it was run.
+The reference is explicit that the response "returns the webhook endpoint object
+with the secret field populated" — the signing secret is available **only in the
+creation response**, so it was piped straight into `vercel env add` in the same
+command and never printed.
+
+| field | value |
+| --- | --- |
+| id | `we_1U4RFxBm5a4nTCBVkXWqfDko` |
+| url | `https://ether-bay.vercel.app/api/stripe/webhook` |
+| status | `enabled` |
+| livemode | `false` |
+| enabled_events | the nine in `BILLING_EVENT_TYPES`, exactly |
+
+It points at **the alias**, never a deployment-specific URL: the project's
+`ssoProtection` is `{ enabled: true, deploymentType: "all_except_custom_domains" }`,
+so per-deployment URLs answer 302 to an SSO gate while the alias answers 200.
+
+### Environment variables, after this change
+
+Names only (§8.4). Both new entries were stored as **Sensitive**.
+
+| variable | environments | note |
+| --- | --- | --- |
+| `STRIPE_SECRET_KEY` | **Production** (Sensitive), plus Development, Preview | the Production entry is new. Test-mode key, same value |
+| `STRIPE_WEBHOOK_SECRET` | **Production** (Sensitive) | new, and it is the **registered endpoint's** secret |
+| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_MCP_KEY` | Development, Preview only | **deliberately not added.** `grep -rn` over `app components lib` returns no match for any of them |
+
+**Two different `STRIPE_WEBHOOK_SECRET` values now exist and must not be
+confused.** `.env.local` still holds the `stripe listen --print-secret` value,
+which is what local development verifies against and which was **not** modified.
+The Vercel Production value is the registered endpoint's. Pasting either one
+into the other's place makes every delivery fail signature verification.
+
+### Checks, with their output
+
+- `git status --porcelain` was empty before the deploy.
+- `npm run build` compiled. Route table: **22 routes**, modes unchanged against
+  the `8cc7f75` baseline — `ROUTES IDENTICAL`.
+- The prerendered `/` was **125,912 bytes**, the same length prompts 026
+  through 030 recorded — `LANDING IDENTICAL`.
+- `npm run lint` completed with no diagnostics.
+- `npm test`: 12 tests, 12 pass.
+- `npm run test:db`: 1 pass. `npm run test:billing-db`: 7 pass.
+  `npm run test:owner-db`: 6 pass. All unchanged, as no code changed.
+- The environment-absent build passed and produced the same 22-route table.
+  `.env.local` was restored and confirmed present.
+- `curl https://ether-bay.vercel.app/` → **200**.
+- `curl -X POST https://ether-bay.vercel.app/api/stripe/webhook` → **404 before
+  the deploy, 400 after**, body `{"error":"Missing signature"}`. That is the
+  route's own signature check rejecting an unsigned request, and it is the first
+  time this endpoint has been reachable from the internet.
+- All 22 routes were probed on the alias. The twelve static marketing routes and
+  both auth screens answer 200; `/api/stripe/webhook` answers **405** to a GET;
+  an unknown path answers 404. The four protected routes answer 404 — see the
+  finding below.
+
+#### The delivery, proved from both sides
+
+`stripe trigger checkout.session.completed` against the sandbox produced
+`evt_1U4RPrBm5a4nTCBVU2SHuG7D`, `livemode=false`.
+
+- **Stripe's side:** `pending_webhooks` was **0** on the first poll and stayed 0
+  across three rounds. Stripe considers the delivery complete.
+- **Our side:** exactly **1** row in `billing_webhook_events` for that event id —
+  `type: checkout.session.completed`, `status: processed`, `error_category:
+  null`, `user_id` null, `processed_at` set. No row content beyond status was
+  read or printed.
+
+The null `user_id` is the expected path and not a defect: a `stripe trigger`
+session is **foreign**, carrying no `ether_offer_key` marker, so prompt 028's
+fix answers 200 and ignores it. That is a weak assertion about billing and a
+strong one about everything this prompt changed. Over the network, for the first
+time in this project's history, it proves the endpoint is registered and
+reachable; that **signature verification passes with the registered secret**,
+which no local run has ever exercised; that the deployed Function holds both
+`STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`; and that the deployed build
+reaches Neon, because `claimBillingWebhook` writes before the handler returns.
+
+#### Logs
+
+`vercel logs` on the deployment shows method and path only — `λ POST
+/api/stripe/webhook` at 20:09:24 is the delivery. **No prompt, no email address,
+no request body and no error appears anywhere in them** (§8.3 rule 2). The only
+non-request output is Clerk's development-instance telemetry notice.
+
+#### The client-bundle secret scan
+
+Warranted even with no code change, because a deployed bundle was served on this
+commit for the first time (§8.4, "verify it, do not assume it"). All 16
+referenced `/_next/static` assets were downloaded from the alias (2.3 MB) and
+scanned alongside the served HTML.
+
+`sk_test_`, `sk_live_`, `whsec_`, `vercel_blob_rw_`, `npg_`, `postgresql://`,
+`postgres://`, `rk_test_`, and the literals `BLOB_READ_WRITE_TOKEN`,
+`DATABASE_URL`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`,
+`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` are **all absent**.
+
+`pk_test_` is present, 10 hits, and is the **positive control**: it is the Clerk
+publishable key, it is public by design, and its presence proves the scan would
+have found a secret if one were there.
+
+`CLERK_SECRET_KEY` matched twice and is **not a leak**. The context is
+`i.default.env.CLERK_SECRET_KEY` inside Clerk's isomorphic bundle — a property
+*read* on the env object, i.e. the variable name in code Next never inlines,
+since only `NEXT_PUBLIC_*` is inlined into client bundles. No value accompanies
+it. The two hits are one occurrence in one chunk, counted twice because the
+chunk was downloaded under two filenames.
+
+### Finding: the protected routes answer 404, not a sign-in redirect
+
+`/generate`, `/account`, `/account/export` and `/library` return **404** to a
+signed-out client rather than redirecting to `/sign-in`. The response headers
+name the cause exactly:
+
+```
+x-clerk-auth-reason:  protect-rewrite, dev-browser-missing
+x-clerk-auth-status:  signed-out
+x-matched-path:       /404
+```
+
+**The security boundary holds** — a signed-out caller receives no protected
+content, `proxy.ts`'s `auth.protect()` is doing its job, and this is not a
+regression from this prompt, which changed no code. What is wrong is the
+experience, and the cause is the Clerk **development** instance recorded below:
+a development instance carries its session in a `__clerk_db_jwt` querystring
+rather than a cookie, so a client that has not completed the dev-browser
+handshake is rewritten to 404 instead of redirected. A cookie jar does not fix
+it, because the mechanism is not cookie-based. Fixing it properly is the Clerk
+production instance, which is gated on a custom domain. **Not fixed here**: a
+code change was out of scope for this prompt.
+
+### Still open, after 031
+
+**1. Clerk is running on a development instance, and this is now the largest
+open item.** The publishable key resolves to
+`healthy-chamois-55.clerk.accounts.dev`, and it is the same `pk_test_` key on
+Production, Preview and Development. Three independent confirmations landed
+here: the `dev-browser-missing` header above, Clerk's telemetry notice in the
+deployment logs, and the key itself.
+
+Read live from Clerk's docs on 2026-08-14 rather than asserted, a development
+instance is:
+
+- **capped at 100 users**;
+- **not crawlable by search engines**;
+- unable to transfer user data to another instance — **accounts created on this
+  deployment do not survive the move to production**;
+- carrying a deliberately relaxed security posture, and a querystring-based
+  session rather than an `HttpOnly` `__client` cookie.
+
+A production instance requires a **custom domain with CNAME records**, and
+`vercel domains ls` returns `0 Domains found under dgsloxx417s-projects`. That
+is a billable decision and it is the user's (§7.4 rule 4). Until it is made,
+**this is a test-mode deployment on a development identity provider, and no copy
+anywhere claims otherwise.**
+
+**2. Production and local share one Neon branch.** `vercel env ls` shows a
+single `DATABASE_URL` across Production, Preview and Development, so the
+deployed app writes into the same database `npm run test:db`,
+`test:billing-db` and `test:owner-db` write into — and the delivery row proved
+above was read out of that shared database. A separate Neon branch for
+Production is the obvious answer, but it is a provisioning change and §7.4 says
+to ask first. Left for the user.
+
+**3. The two-account boundary through the browser.** Unchanged. It needs two
+real Clerk sign-ins, still a prohibited action for the implementing agent. This
+prompt makes it *possible* — there is now a reachable deployment — and does not
+claim to have done it. Note that the 404 finding above will make those sign-ins
+behave oddly from anything but a real browser.
+
+**4. A foreign Checkout Session retried for three days.** Now *observable* for
+the first time, since retries only apply to a registered endpoint, but not yet
+observed: the one delivery made here succeeded on the first attempt, so no retry
+was exercised.
+
+**5. The per-refund proportional floor and the dispute-won rule.** Decided by
+the user on 2026-08-14 to stay as they are. Not bugs, and carried forward only
+so a later session does not rediscover them as findings.

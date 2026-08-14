@@ -460,3 +460,129 @@ for `customer.subscription.deleted` on an owner the database no longer knows.
 `reconcile_credit_balance` keys on PostgreSQL's `now()`. Expiry is verified in
 `tests/billing-db.integration.ts` by moving a grant's `expires_at` into the real
 past. See `docs/backend.md`, prompt 029.
+
+## Verify the deployed Stripe webhook end to end
+
+The second time a Stripe delivery has been verified by hand (§3), and the first
+against a **registered** endpoint rather than `stripe listen`. The section above
+covers the local dev server; this one covers the deployment.
+
+**Never confuse the two signing secrets.** `.env.local`'s
+`STRIPE_WEBHOOK_SECRET` is the `stripe listen` one and is what the local
+procedure uses. Vercel Production holds the registered endpoint's, which is a
+different value. Each fails signature verification in the other's place.
+
+### 1. Is the endpoint reachable, and is the deployed build the one you think?
+
+```bash
+curl -s -o /dev/null -w 'root %{http_code}\n' https://ether-bay.vercel.app/
+curl -s -X POST https://ether-bay.vercel.app/api/stripe/webhook
+```
+
+`400 {"error":"Missing signature"}` is the pass. **404 means the deployed build
+predates the route** — that is what a stale production alias looks like, and it
+is not a routing bug. Confirm the live commit before chasing anything:
+
+```bash
+vercel api "/v9/projects/<projectId>?teamId=<teamId>" \
+| node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+    const t=JSON.parse(s).targets.production;
+    console.log(t.readyState, t.meta.githubCommitSha, JSON.stringify(t.alias));})'
+```
+
+The same call answers **"is this project Git-connected?"**, which
+`vercel project inspect` does not: read its `link` field. `link.type ===
+"github"` means a `git push` to `link.productionBranch` is the deploy, and
+`vercel deploy --prod` would be a second, redundant path.
+
+**Always register against the alias, never a deployment URL.** With
+`ssoProtection.deploymentType: "all_except_custom_domains"`, per-deployment URLs
+answer 302 to an SSO gate and Stripe can never reach them.
+
+### 2. Trigger, and read the result from both sides
+
+One side alone is not proof: Stripe reporting success says nothing about what
+was written, and a row says nothing about whether the signature verified.
+
+```bash
+SK=$(grep -m1 '^STRIPE_SECRET_KEY=' .env.local | sed -E 's/^STRIPE_SECRET_KEY=//; s/^"//; s/"$//')
+stripe trigger checkout.session.completed --api-key "$SK"
+
+# Stripe's side: pending_webhooks must reach 0.
+curl -sS -G https://api.stripe.com/v1/events -H "Authorization: Bearer $SK" \
+  -d "types[]=checkout.session.completed" -d limit=1 \
+| node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+    const e=JSON.parse(s).data[0];
+    console.log(e.id, "livemode="+e.livemode, "pending_webhooks="+e.pending_webhooks);})'
+```
+
+Then our side, with the read-only script procedure at the top of this file.
+**Select status columns, never row content:**
+
+```sql
+select count(*)::int as rows, max(type) as type, max(status::text) as status,
+       max(error_category) as error_category,
+       (max(user_id) is null) as user_id_is_null
+from billing_webhook_events where stripe_event_id = '<evt_…>';
+```
+
+`rows: 1`, `status: processed`, `error_category: null` is the pass. **A null
+`user_id` is correct here** and not a failure: a `stripe trigger` session is
+foreign, carries no `ether_offer_key` marker, and is deliberately ignored.
+
+### 3. Confirm the logs leak nothing
+
+```bash
+vercel logs <deployment-url>
+```
+
+Method and path only. A prompt, an email address or a request body in there is a
+§8.3 rule 2 violation and a finding.
+
+### Reading `x-clerk-auth-reason` when a protected route 404s
+
+A signed-out request to `/generate`, `/account` or `/library` answering **404**
+instead of redirecting to `/sign-in` is not a routing bug. Check the headers:
+
+```bash
+curl -s -D - -o /dev/null https://ether-bay.vercel.app/generate | grep -i clerk
+```
+
+`x-clerk-auth-reason: protect-rewrite, dev-browser-missing` means the Clerk
+**development** instance's `__clerk_db_jwt` querystring handshake never
+happened. Any non-browser client sees this, and a cookie jar does not fix it,
+because the mechanism is not cookie-based. The boundary is holding; the
+redirect is what a production Clerk instance would restore.
+
+## Scan a deployed client bundle for secrets
+
+The section above scans a local build. This scans what is actually being served,
+which is the §8.4 question after a deploy.
+
+```bash
+cd "$(mktemp -d)"
+curl -s https://ether-bay.vercel.app/ > page.html
+grep -oE '/_next/static/[^"]+\.(js|css)' page.html | sort -u \
+  | sed 's#^#https://ether-bay.vercel.app#' \
+  | xargs -P 8 -n 1 curl -s --max-time 20 -O --output-dir .
+
+for pat in sk_test_ sk_live_ whsec_ vercel_blob_rw_ npg_ postgresql:// rk_test_ \
+           BLOB_READ_WRITE_TOKEN DATABASE_URL CLOUDFLARE_API_TOKEN STRIPE_SECRET_KEY; do
+  n=$(grep -o -- "$pat" *.js *.css page.html 2>/dev/null | wc -l)
+  printf '%-24s %s\n' "$pat" "$([ "$n" -eq 0 ] && echo absent || echo "*** $n HITS ***")"
+done
+```
+
+**Serialise the downloads with `-P 8` and `--max-time`.** A plain `while read`
+loop over sixteen assets timed out at two minutes on 2026-08-14; the parallel
+form finishes in seconds.
+
+**Always run a positive control**, or an all-absent result proves only that the
+grep ran. `pk_test_` must be **present** — it is the Clerk publishable key, it
+is public by design, and it is the proof the scan can see into the bundle.
+
+**Expect one benign hit on `CLERK_SECRET_KEY`.** The context is
+`i.default.env.CLERK_SECRET_KEY` in Clerk's isomorphic bundle: a property read
+on the env object, i.e. the variable *name*, which Next never replaces because
+only `NEXT_PUBLIC_*` is inlined. Grep 200 characters of context before calling
+any name match a leak - a name is not a value.
