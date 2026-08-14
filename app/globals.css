@@ -68,6 +68,25 @@
   );
   --grad-block: linear-gradient(135deg, #6843ec 0%, #4322a8 100%);
 
+  /* 5. Page atmosphere - the ambient wash behind every route except `/`.
+        The hero wash is the masthead's alone and is never repeated; this one
+        is quieter, positionable, and carries no lime, because lime marks the
+        thing you act on and a page-wide wash is not clickable.
+
+        Every hex is already in 1.1. The alphas are measured, not judged: the
+        brightest point composites to #19132E over --ink, where --text-3 holds
+        5.05:1, --text-2 10.24:1 and --text 17.86:1. See design-system.md 1.2.
+
+        The terminal stop is #0A0A0A at zero alpha rather than `transparent`,
+        so premultiplied gradient interpolation cannot raise a grey haze. */
+  --grad-page: radial-gradient(
+    var(--page-wash-size, 110% 80%) at var(--page-wash-at, 50% 0%),
+    #6843ec29 0%,
+    #832bc124 30%,
+    #f452ff14 52%,
+    #0a0a0a00 78%
+  );
+
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
   color-scheme: dark;
@@ -165,11 +184,42 @@
     will-change: transform;
   }
 
-  /* The hero is above the fold, so it plays on load rather than on scroll. */
+  /* A masthead is above the fold, so it plays on load rather than on scroll.
+     The landing hero and every secondary route masthead share this one class:
+     it is CSS, so it costs no client bundle and ships the content visible. */
   .hero-in {
     animation: reveal-in 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
     animation-delay: calc(var(--i, 0) * 90ms);
   }
+}
+
+/* ---------------------------------------------------------------------------
+   Drawable hairline.
+
+   The secondary routes are built almost entirely from 1px `--line` rules, and
+   those rules *are* the structure, so they are what scroll motion has to act
+   on. A border cannot be scaled, so the rule is drawn as a pseudo-element and
+   the border is kept as a transparent 1px reserve: the box geometry is
+   identical to `border-t border-line`, to the pixel.
+
+   `--rule` defaults to 1, so the hairline is full width in the server-rendered
+   HTML, under reduced motion, and in any browser where the script never runs.
+   `components/motion/ScrollScrub.tsx` scrubs it from 0.
+--------------------------------------------------------------------------- */
+.rule {
+  position: relative;
+  border-top: 1px solid transparent;
+}
+
+.rule::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  inset-inline: 0;
+  height: 1px;
+  background-color: var(--color-line);
+  transform: scaleX(var(--rule, 1));
+  transform-origin: left center;
 }
 
 @media (prefers-reduced-motion: reduce) {

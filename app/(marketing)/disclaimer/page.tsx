@@ -1,4 +1,7 @@
+import type { CSSProperties } from "react";
 import type { Metadata } from "next";
+import { PageAtmosphere } from "@/components/motion/PageAtmosphere";
+import { ScrollScrub } from "@/components/motion/ScrollScrub";
 import { Container } from "@/components/ui/Container";
 
 export const metadata: Metadata = {
@@ -27,31 +30,48 @@ const SECTIONS = [
 
 export default function DisclaimerPage() {
   return (
-    <Container>
-      <article className="mx-auto max-w-[720px] pt-32 pb-24 md:pt-40 md:pb-32">
-        <header className="pb-16 md:pb-24">
-          <h1 className="text-text text-[clamp(40px,6vw,60px)] leading-[1.5] tracking-[-0.01em]">
-            Product disclaimer
-          </h1>
-          <p className="text-text-2 mt-6 max-w-[60ch] text-[15px] leading-[26px]">
-            These practical limits describe the current image generator. They
-            are not a terms or privacy document.
-          </p>
-        </header>
-
-        <div className="space-y-14 md:space-y-16">
-          {SECTIONS.map((section) => (
-            <section key={section.title}>
-              <h2 className="text-violet text-[22px] leading-[30px]">
-                {section.title}
-              </h2>
-              <p className="text-text-2 mt-4 max-w-[65ch] text-[15px] leading-[26px]">
-                {section.copy}
+    <>
+      <PageAtmosphere variant="column" />
+      <ScrollScrub>
+        <Container>
+          <article className="mx-auto max-w-[720px] pt-32 pb-24 md:pt-40 md:pb-32">
+            <header className="pb-16 md:pb-24">
+              <p
+                className="hero-in text-violet text-[12px] leading-none font-medium tracking-[0.12em] uppercase"
+                style={{ "--i": 0 } as CSSProperties}
+              >
+                Product limits
               </p>
-            </section>
-          ))}
-        </div>
-      </article>
-    </Container>
+              <h1
+                className="hero-in text-text mt-8 text-[clamp(40px,6vw,60px)] leading-[1.5] tracking-[-0.01em]"
+                style={{ "--i": 1 } as CSSProperties}
+              >
+                Product disclaimer
+              </h1>
+              <p
+                className="hero-in text-text-2 mt-6 max-w-[60ch] text-[15px] leading-[26px]"
+                style={{ "--i": 2 } as CSSProperties}
+              >
+                These practical limits describe the current image generator. They
+                are not a terms or privacy document.
+              </p>
+            </header>
+
+            <div className="space-y-14 md:space-y-16">
+              {SECTIONS.map((section) => (
+                <section key={section.title}>
+                  <h2 className="text-violet text-[22px] leading-[30px]">
+                    {section.title}
+                  </h2>
+                  <p className="text-text-2 mt-4 max-w-[65ch] text-[15px] leading-[26px]">
+                    {section.copy}
+                  </p>
+                </section>
+              ))}
+            </div>
+          </article>
+        </Container>
+      </ScrollScrub>
+    </>
   );
 }

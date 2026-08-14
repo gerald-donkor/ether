@@ -602,3 +602,114 @@ is public by design, and it is the proof the scan can see into the bundle.
 on the env object, i.e. the variable *name*, which Next never replaces because
 only `NEXT_PUBLIC_*` is inlined. Grep 200 characters of context before calling
 any name match a leak - a name is not a value.
+
+## Measure contrast against a translucent wash
+
+`design-system.md` §6.6 says contrast is checked, not assumed, and prompt 032
+needed it twice: once for the baseline pairs and once for every stop of a new
+gradient ramp. Doing it by eye is exactly the §12 rule 4 failure.
+
+The two things a hand calculation gets wrong are that the browser composites a
+translucent stop in **gamma space**, not linear, and that CSS interpolates
+gradient stops with **premultiplied** alpha.
+
+```bash
+node -e '
+const hex=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16)/255);
+const lin=c=>c<=0.04045?c/12.92:Math.pow((c+0.055)/1.055,2.4);
+const L=r=>0.2126*lin(r[0])+0.7152*lin(r[1])+0.0722*lin(r[2]);
+const ratio=(a,b)=>{const[x,y]=[L(a),L(b)].sort((p,q)=>q-p);return (x+0.05)/(y+0.05)};
+const over=(s,a,d)=>s.map((c,i)=>a*c+(1-a)*d[i]);          // sRGB, not linear
+const INK=hex("#0a0a0a"), T3=hex("#848895");
+for (const [stop,alpha] of [["#6843ec",0x29/255],["#832bc1",0x24/255],["#f452ff",0x14/255]]) {
+  const g=over(hex(stop),alpha,INK);
+  console.log(stop, alpha.toFixed(3),
+    "#"+g.map(c=>Math.round(c*255).toString(16).padStart(2,"0")).join(""),
+    ratio(T3,g).toFixed(2)+":1");
+}'
+```
+
+**Measure the resting value, not the animated one.** Design the drift so opacity
+only ever moves *down* from its cap; then the resting value is both the worst
+case and what reduced motion renders, and one number covers both.
+
+A stale figure is worth rechecking rather than quoting: §1.1 recorded
+`--text-3` on `--ink` as 6.3:1 for nine prompts. It is 5.60:1.
+
+## Prove a motion component creates nothing under reduced motion
+
+`design-system.md` §3 requires this evidence for every animation, and the
+evidence is **absence of inline style**, never a claim that `gsap.matchMedia`
+was used. Chrome must genuinely be in reduced-motion mode, which page JS cannot
+fake, so drive a forced instance over CDP. Node 22+ has `WebSocket` built in, so
+this needs no dependency.
+
+```bash
+google-chrome-stable --headless=new --force-prefers-reduced-motion \
+  --remote-debugging-port=9333 --user-data-dir=/tmp/cr-reduced about:blank &
+sleep 3
+```
+
+Then connect to `http://127.0.0.1:9333/json/list`, take the first `page` target's
+`webSocketDebuggerUrl`, `Page.navigate`, and `Runtime.evaluate` a probe that
+reports `getAttribute('style')` for every element the motion touches. Sample
+once at load and again after scrolling. A GSAP tween that ran leaves an inline
+`transform`; a tween that was never created leaves the attribute `null` or
+holding only what the server rendered.
+
+**`--force-prefers-reduced-motion` takes no value** despite reading like a flag
+that should. Confirm it landed by having the probe return
+`matchMedia('(prefers-reduced-motion: reduce)').matches` alongside the result.
+
+**Kill the instance by its `--user-data-dir`, and never with a bare `pkill -f`
+on a pattern your own shell command line contains** - `pkill -f cr-reduced`
+matched the shell running it and killed the heredoc mid-write.
+
+## Sweep every route for overflow and for an overlay that eats input
+
+A fixed decorative layer is one `pointer-events` slip away from swallowing every
+click on the site, and `design-system.md` §6.8 requires every keyboard stop to
+stay reachable. Both are cheap to prove exhaustively rather than by clicking
+around three pages.
+
+Drive the same CDP session as above (without the reduced-motion flag), call
+`Emulation.setDeviceMetricsOverride` for each width, and per route evaluate:
+
+```js
+document.documentElement.scrollWidth - innerWidth        // must be <= 0
+```
+
+and, for every focusable element **whose centre is strictly inside the
+viewport**, check that `document.elementFromPoint(centre)` is the element, an
+ancestor, or a descendant - never the decorative layer.
+
+**Clamping an off-screen element's probe point into the viewport invents
+failures.** Skip elements outside the viewport instead; clamping reported
+thirteen "obscured" controls on `/library` that were simply below the fold.
+
+## Compare the client bundle weight of `/` across a change
+
+`AGENTS.md` §8.1 protects `/`'s *output*, and the HTML comparison above proves
+the markup. It does not prove the page did not gain JavaScript: a new client
+component elsewhere in the app can re-split a shared vendor chunk and change
+what `/` downloads.
+
+```bash
+jsweight() {
+  grep -o '/_next/static/chunks/[A-Za-z0-9_/.-]*\.js' .next/server/app/index.html \
+    | sort -u | sed 's#^/_next/#.next/#' \
+    | while read -r f; do [ -f "$f" ] && stat -c%s "$f"; done \
+    | awk '{s+=$1;n++} END {printf "%d chunks, %d bytes\n", n, s}'
+}
+npm run build > /dev/null 2>&1 && jsweight            # after
+git stash push -u -- <only the source files you changed>
+npm run build > /dev/null 2>&1 && jsweight            # before
+git stash pop
+```
+
+Prompt 032 added two client components under `components/motion/` and `/` went
+from 15 chunks / 1,078,802 bytes to 16 / 1,079,033: **+231 bytes**, chunk
+boundary overhead, with ScrollTrigger itself staying out of `/`. Report the
+number rather than asserting "no impact" - and note that the normalised HTML
+diff **will** show chunk-list changes when this happens, which is a real result
+and not something to widen the regex until it disappears.

@@ -1,7 +1,9 @@
+import type { CSSProperties } from "react";
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { LibraryRowActions } from "@/components/app/LibraryRowActions";
+import { PageAtmosphere } from "@/components/motion/PageAtmosphere";
 import { Container } from "@/components/ui/Container";
 import { getModel } from "@/lib/ai/catalog";
 import { requireUserId } from "@/lib/auth";
@@ -51,154 +53,161 @@ export default async function LibraryPage({
   });
 
   return (
-    <Container className="py-16 md:py-24">
-      <section aria-labelledby="library-title">
-        <h1
-          id="library-title"
-          className="text-text text-[clamp(36px,7vw,64px)] leading-[1.2] font-normal tracking-[-0.01em]"
-        >
-          Library
-        </h1>
-        <p className="text-text-2 mt-4 max-w-[52ch] text-[15px] leading-[26px]">
-          Every image you have generated, newest first. Removing one takes it
-          out of your library and every public surface, and you can put it back.
-        </p>
-
-        <div className="mt-10 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-          {/* A native GET form. The page reads its own query parameters on the
-              server, so there is no client-side fetching here. */}
-          <form method="get" action="/library" className="w-full max-w-[420px]">
-            <label
-              htmlFor="library-search"
-              className="text-text-3 block text-[13px]"
-            >
-              Search your prompts
-            </label>
-            <div className="mt-2 flex items-center gap-2">
-              <input
-                id="library-search"
-                type="search"
-                name={SEARCH_FIELD}
-                defaultValue={search}
-                maxLength={500}
-                autoComplete="off"
-                className="bg-surface-2 rounded-pill text-text placeholder:text-text-3 min-w-0 flex-1 px-5 py-2.5 text-[13px]"
-                placeholder="A word from the prompt"
-              />
-              {/* The current view travels with the search, so searching inside
-                  Removed stays in Removed. Paging resets by omission. */}
-              <input type="hidden" name={VIEW_FIELD} value={view} />
-              <button
-                type="submit"
-                className="rounded-pill border-line text-text hover:border-text-3 inline-flex items-center justify-center border px-5 py-2.5 text-[13px] font-medium whitespace-nowrap transition-transform duration-200 ease-(--ease-out) active:scale-[0.98]"
-              >
-                Search
-              </button>
-            </div>
-          </form>
-
-          <nav aria-label="Library view" className="flex items-center gap-2">
-            <ViewSwitch current={view} target="active" search={search}>
-              Your images
-            </ViewSwitch>
-            <ViewSwitch current={view} target="removed" search={search}>
-              Removed
-            </ViewSwitch>
-          </nav>
-        </div>
-
-        {rows.length > 0 ? (
-          <>
-            <ul className="border-line divide-line mt-10 divide-y border-t">
-              {rows.map((row) => {
-                // A row written before lib/ai/catalog.ts existed can hold an
-                // id the registry does not list, so the stored id is the
-                // fallback rather than "undefined".
-                const modelLabel = getModel(row.model)?.label ?? row.model;
-
-                return (
-                  <li
-                    key={row.id}
-                    className="grid grid-cols-[64px_minmax(0,1fr)] items-start gap-x-5 gap-y-4 py-6 sm:grid-cols-[64px_minmax(0,1fr)_auto]"
-                  >
-                    <div className="rounded-card bg-surface relative size-16 overflow-hidden">
-                      <Image
-                        src={row.imageUrl}
-                        alt={row.prompt}
-                        fill
-                        sizes="64px"
-                        className="object-cover"
-                      />
-                    </div>
-
-                    <div className="min-w-0">
-                      {view === "active" ? (
-                        <Link
-                          href={`/g/${row.id}`}
-                          className="text-text hover:text-text-2 rounded-sm text-[15px] leading-[26px] transition-colors"
-                        >
-                          {row.prompt}
-                        </Link>
-                      ) : (
-                        // The permalink 404s for a removed row by design, so
-                        // the prompt is not a link here. The row's own actions
-                        // are what it offers instead.
-                        <p className="text-text-2 text-[15px] leading-[26px]">
-                          {row.prompt}
-                        </p>
-                      )}
-                      {/* Spacing separates the meta rather than a punctuation
-                          mark, because the site uses none anywhere else. */}
-                      <p className="text-text-3 mt-2 flex flex-wrap gap-x-5 gap-y-1 text-[13px] leading-[22px]">
-                        <span>{modelLabel}</span>
-                        <span>
-                          {row.width} x {row.height}
-                        </span>
-                        <span>{dateFormat.format(row.createdAt)}</span>
-                        <span>
-                          {row.visibility[0].toUpperCase() +
-                            row.visibility.slice(1)}
-                        </span>
-                      </p>
-                    </div>
-
-                    <div className="col-start-2 sm:col-start-3">
-                      <LibraryRowActions id={row.id} view={view} />
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-
-            {/* Page numbers are not invented. The rail says which page this is
-                and whether there is another, which is what the `pageSize + 1`
-                read actually knows. A total would need a count query. */}
-            <nav
-              aria-label="Pagination"
-              className="border-line mt-8 flex items-center justify-between gap-4 border-t pt-6"
-            >
-              <PageLink
-                href={libraryHref({ search, view, page: page - 1 })}
-                enabled={page > 1}
-              >
-                Newer
-              </PageLink>
-              <p className="text-text-3 text-[13px]">Page {page}</p>
-              <PageLink
-                href={libraryHref({ search, view, page: page + 1 })}
-                enabled={hasMore}
-              >
-                Older
-              </PageLink>
-            </nav>
-          </>
-        ) : (
-          <p className="text-text-2 mt-10 max-w-[52ch] text-[15px] leading-[26px]">
-            {emptyMessage(view, search, page)}
+    <>
+      <PageAtmosphere variant="quiet" />
+      <Container className="relative py-16 md:py-24">
+        <section aria-labelledby="library-title">
+          <h1
+            id="library-title"
+            className="hero-in text-text text-[clamp(36px,7vw,64px)] leading-[1.2] font-normal tracking-[-0.01em]"
+            style={{ "--i": 0 } as CSSProperties}
+          >
+            Library
+          </h1>
+          <p
+            className="hero-in text-text-2 mt-4 max-w-[52ch] text-[15px] leading-[26px]"
+            style={{ "--i": 1 } as CSSProperties}
+          >
+            Every image you have generated, newest first. Removing one takes it
+            out of your library and every public surface, and you can put it back.
           </p>
-        )}
-      </section>
-    </Container>
+
+          <div className="mt-10 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+            {/* A native GET form. The page reads its own query parameters on the
+                server, so there is no client-side fetching here. */}
+            <form method="get" action="/library" className="w-full max-w-[420px]">
+              <label
+                htmlFor="library-search"
+                className="text-text-3 block text-[13px]"
+              >
+                Search your prompts
+              </label>
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  id="library-search"
+                  type="search"
+                  name={SEARCH_FIELD}
+                  defaultValue={search}
+                  maxLength={500}
+                  autoComplete="off"
+                  className="bg-surface-2 rounded-pill text-text placeholder:text-text-3 min-w-0 flex-1 px-5 py-2.5 text-[13px]"
+                  placeholder="A word from the prompt"
+                />
+                {/* The current view travels with the search, so searching inside
+                    Removed stays in Removed. Paging resets by omission. */}
+                <input type="hidden" name={VIEW_FIELD} value={view} />
+                <button
+                  type="submit"
+                  className="rounded-pill border-line text-text hover:border-text-3 inline-flex items-center justify-center border px-5 py-2.5 text-[13px] font-medium whitespace-nowrap transition-transform duration-200 ease-(--ease-out) active:scale-[0.98]"
+                >
+                  Search
+                </button>
+              </div>
+            </form>
+
+            <nav aria-label="Library view" className="flex items-center gap-2">
+              <ViewSwitch current={view} target="active" search={search}>
+                Your images
+              </ViewSwitch>
+              <ViewSwitch current={view} target="removed" search={search}>
+                Removed
+              </ViewSwitch>
+            </nav>
+          </div>
+
+          {rows.length > 0 ? (
+            <>
+              <ul className="border-line divide-line mt-10 divide-y border-t">
+                {rows.map((row) => {
+                  // A row written before lib/ai/catalog.ts existed can hold an
+                  // id the registry does not list, so the stored id is the
+                  // fallback rather than "undefined".
+                  const modelLabel = getModel(row.model)?.label ?? row.model;
+
+                  return (
+                    <li
+                      key={row.id}
+                      className="grid grid-cols-[64px_minmax(0,1fr)] items-start gap-x-5 gap-y-4 py-6 sm:grid-cols-[64px_minmax(0,1fr)_auto]"
+                    >
+                      <div className="rounded-card bg-surface relative size-16 overflow-hidden">
+                        <Image
+                          src={row.imageUrl}
+                          alt={row.prompt}
+                          fill
+                          sizes="64px"
+                          className="object-cover"
+                        />
+                      </div>
+
+                      <div className="min-w-0">
+                        {view === "active" ? (
+                          <Link
+                            href={`/g/${row.id}`}
+                            className="text-text hover:text-text-2 rounded-sm text-[15px] leading-[26px] transition-colors"
+                          >
+                            {row.prompt}
+                          </Link>
+                        ) : (
+                          // The permalink 404s for a removed row by design, so
+                          // the prompt is not a link here. The row's own actions
+                          // are what it offers instead.
+                          <p className="text-text-2 text-[15px] leading-[26px]">
+                            {row.prompt}
+                          </p>
+                        )}
+                        {/* Spacing separates the meta rather than a punctuation
+                            mark, because the site uses none anywhere else. */}
+                        <p className="text-text-3 mt-2 flex flex-wrap gap-x-5 gap-y-1 text-[13px] leading-[22px]">
+                          <span>{modelLabel}</span>
+                          <span>
+                            {row.width} x {row.height}
+                          </span>
+                          <span>{dateFormat.format(row.createdAt)}</span>
+                          <span>
+                            {row.visibility[0].toUpperCase() +
+                              row.visibility.slice(1)}
+                          </span>
+                        </p>
+                      </div>
+
+                      <div className="col-start-2 sm:col-start-3">
+                        <LibraryRowActions id={row.id} view={view} />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+
+              {/* Page numbers are not invented. The rail says which page this is
+                  and whether there is another, which is what the `pageSize + 1`
+                  read actually knows. A total would need a count query. */}
+              <nav
+                aria-label="Pagination"
+                className="border-line mt-8 flex items-center justify-between gap-4 border-t pt-6"
+              >
+                <PageLink
+                  href={libraryHref({ search, view, page: page - 1 })}
+                  enabled={page > 1}
+                >
+                  Newer
+                </PageLink>
+                <p className="text-text-3 text-[13px]">Page {page}</p>
+                <PageLink
+                  href={libraryHref({ search, view, page: page + 1 })}
+                  enabled={hasMore}
+                >
+                  Older
+                </PageLink>
+              </nav>
+            </>
+          ) : (
+            <p className="text-text-2 mt-10 max-w-[52ch] text-[15px] leading-[26px]">
+              {emptyMessage(view, search, page)}
+            </p>
+          )}
+        </section>
+      </Container>
+    </>
   );
 }
 

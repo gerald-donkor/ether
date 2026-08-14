@@ -35,12 +35,19 @@ Every hex below is sampled from the reference vector, not invented.
 - **Two accents, locked.** `--violet` carries identity, `--lime` carries action. A lime element is always something you can click. Violet is never a button fill.
 - **Text on lime is `--ink`, never white.** `#D2FF3A` on white is 1.3:1 - an automatic accessibility failure. `#0A0A0A` on `#D2FF3A` is 15.9:1.
 - **Text on violet is white.** `#FFFFFF` on `#6843EC` is 5.6:1, passes AA for body.
-- `--text-3` on `--ink` is 6.3:1 - safe for the small uppercase labels it is used for.
+- `--text-3` on `--ink` is **5.60:1** - safe for the small uppercase labels it is
+  used for, and the tightest pair in the system. *(This line read 6.3:1 until
+  prompt 032 recomputed it. WCAG 2.x relative luminance gives 5.60:1; the old
+  figure was wrong, not a different standard. It is the number the page
+  atmosphere in §1.2 has to leave intact, so it is corrected here rather than
+  carried forward.)*
 - No section inverts. The page is dark end to end (see §6).
 
 ### 1.2 Gradients
 
-Four, and only four. Each has one job.
+**Five, and only five.** Each has one job. The fifth was added by prompt 032 at
+the user's explicit request and is the only one used on more than one route;
+see §5.1.
 
 ```css
 /* 1. Hero wash - violet bleeding out of the top-left corner into black.
@@ -57,7 +64,46 @@ Four, and only four. Each has one job.
 
 /* 4. Brand block - the violet tile holding the abstract mark. */
 --grad-block: linear-gradient(135deg, #6843EC 0%, #4322A8 100%);
+
+/* 5. Page atmosphere - the ambient wash behind every route except `/`.
+      Positionable, so one definition serves all sixteen. */
+--grad-page: radial-gradient(
+  var(--page-wash-size, 110% 80%) at var(--page-wash-at, 50% 0%),
+  #6843EC29 0%,     /* alpha 0.161 */
+  #832BC124 30%,    /* alpha 0.141 */
+  #F452FF14 52%,    /* alpha 0.078 */
+  #0A0A0A00 78%
+);
 ```
+
+**`--grad-page` is where `--violet-deep` and `--magenta` finally do the job §1.1
+assigns them.** Before prompt 032 both were declared in `@theme` and used
+nowhere in the codebase, so two thirds of the system's atmospheric range had
+never been spent. No new colour enters the palette: every hex above is already
+in §1.1, and lime is excluded on purpose, because lime marks the thing you act
+on and a page-wide wash is not clickable.
+
+The **ramp** is fixed; the per-route variation is **position and angle**, passed
+in as `--page-wash-at` and `--page-wash-size` from the placement table in
+`components/motion/PageAtmosphere.tsx`. The terminal stop is `#0A0A0A` at zero
+alpha rather than `transparent`, because CSS interpolates gradients with
+premultiplied alpha and the explicit ink stop keeps a grey haze impossible.
+
+**Measured, not judged** (§6.6). The alphas were chosen against the composited
+ground, not by eye. The wash's brightest point composites to **`#19132E`** over
+`--ink`, and at that point:
+
+| Role | On `--ink` | On the wash at its brightest | AA floor |
+|---|---|---|---|
+| `--text-3` | 5.60:1 | **5.05:1** | 4.5:1 |
+| `--text-2` | 11.35:1 | **10.24:1** | 4.5:1 |
+| `--text` | 19.80:1 | **17.86:1** | 4.5:1 |
+
+The restrained tier (§2.8) caps the layer at `opacity: 0.55`, giving a brightest
+ground of `#120F1E` and `--text-3` at **5.33:1**. Both figures are the worst
+case for their tier: the drift only ever takes opacity *down* from the resting
+cap, so the resting value is the measurement, and it is also what reduced motion
+renders.
 
 `--grad-stat` is applied with `background-clip: text; color: transparent;` and **must** carry a `color` fallback of `--lime` for `@supports not (background-clip: text)`.
 
@@ -243,6 +289,21 @@ The authenticated shell uses a compact 64px header over `--container`, with the
 wordmark left and `Generate`, `Library`, `Account`, and the Clerk user control right. It
 has no marketing footer.
 
+> **Correction, prompt 032.** This section, §2.11 and §2.12 each used to state
+> that these routes add no motion. **They now carry the restrained tier of the
+> page atmosphere, because the user asked for motion on every route except `/`**
+> (`AGENTS.md` §1 rule 1). The three statements are corrected rather than left
+> contradicting the repository (§12 rule 8).
+>
+> The restrained tier is **the wash at `opacity: 0.55` and the masthead
+> stagger, and nothing else**. Specifically: no scrubbed motion and no drift on
+> any route with a form; nothing animates in response to a pending action, a
+> status region or a result; the `role="status"` regions, focus management and
+> two-step confirms across these sections are behavioural contracts and are
+> untouched; and the reserved result slot below keeps its space exactly as
+> specified. `/generate` gets the wash only, since its masthead lives in
+> `GeneratorWorkspace`, which prompt 032 did not modify.
+
 `/account` extends its existing section stack with one billing group below
 generation usage. It uses the same top border, 22px/30px section title, 12px
 uppercase labels, 15px/26px body copy, statistic treatment, and pill controls.
@@ -351,8 +412,15 @@ Each image keeps its stored intrinsic ratio, uses `--r-card`, supplies
 responsive `sizes`, links to `/g/<id>`, and is never priority. The only caption
 is its real creation date. Prompt and owner are absent from the projection and
 the generic alt text claims no subject. The empty state states only that no
-public work is available and links to Generate. The page adds no motion beyond
-existing link and button feedback.
+public work is available and links to Generate.
+
+**Prompt 032 gives these four routes the marketing tier of the page
+atmosphere**: the `--grad-page` wash, a masthead stagger, the hairline draw and,
+where a photograph exists, the image drift (§3). `/community`'s twelve
+generations are deliberately **excluded from the drift**: they are other
+people's work in a proof sheet, and cropping and panning a dozen of them at
+once would be restless and would misrepresent the images. Its only hairline is
+the empty state's.
 
 ### 2.10 Footer destination routes
 
@@ -372,7 +440,17 @@ tool without duplicating it.
 Only `/generator` uses an existing artboard photograph, labelled as a reference
 and rendered through `next/image` without priority. The other routes rely on
 type, spacing, borders, and the established surface token. They read no request
-state, provider, secret, or user data and add no motion. Footer destinations use
+state, provider, secret, or user data.
+
+**Prompt 032 gives them the marketing tier too** (§2.9, §3). Two of them keep a
+narrower share of it than the rest, and deliberately: `/services` and `/grants`
+carry their rules on the **vertical** axis (`border-l`), which the hairline
+draw does not act on, so they take the wash and the masthead stagger only.
+`/build` gets no masthead eyebrow, because its four clause terms already sit at
+the §1.3 label role and a fifth would break the eyebrow budget (§6.4) on a
+two-section page; `/careers`, `/blog` and `/newsletter` get none either,
+because each page's `h1` **is** the page name and an eyebrow repeating it would
+be a label doing no work. Footer destinations use
 real internal links; unverified social accounts remain non-interactive visual
 lockups until verified URLs exist.
 
@@ -445,9 +523,12 @@ through a `role="status"` node and reads without colour.
 its `--r-card` image box and its two-line caption; the only visible change is
 the caption taking the established `--text-2` to `--text` hover transition.
 
-**No new token, radius, colour or z-index level, and no row in §3** - nothing
-on this route animates beyond the existing link hover and the button's
-`active:scale`.
+**No new token, radius, colour or z-index level.** ~~And no row in §3~~ -
+**corrected by prompt 032**: `/g/[id]` and `/g/[id]/report` now carry the
+restrained tier described in §2.8, the wash plus the masthead stagger. Nothing
+else on these routes animates beyond the existing link hover and the button's
+`active:scale`, and the report page's `role="status"` outcomes, control
+disabling and focus handling are unchanged.
 
 ### 2.12 Generation library
 
@@ -474,8 +555,12 @@ existing permanent-delete flow.
 
 `/generate` now receives six newest live images, retaining its two-row
 three-column history shape and linking to the full library. The library adds no
-token, radius, colour, z-index level or motion. No §3 row is added: only the
-existing link hover and button `active:scale` feedback apply.
+token, radius, colour or z-index level. **It does now carry motion**, corrected
+by prompt 032: the restrained tier from §2.8, the wash plus the masthead
+stagger on the heading and its paragraph. The rows, search form, view switch,
+pagination and both `role="status"` outcomes are untouched, and beyond the
+masthead only the existing link hover and button `active:scale` feedback
+apply.
 
 ---
 
@@ -496,6 +581,10 @@ Restrained and motivated. Every animation below has a stated reason; anything wi
 | Hero photo beads | A drawn svg layer in the image's own pixel space, cropped by `xMidYMid slice` so it tracks the `object-cover` beneath it, marks twenty-three of the real water beads. Each is three parts: a faint halo, a hard specular core placed where the photograph's own highlight sits, and a thin crescent on the far side, the refracted rim light. Four cycles run per bead, none sharing a period: the core wanders 1 to 2 source units on a 4s to 9s lap, flickers on a 2.6s to 5s cycle, the crescent breathes on 3.7s and the halo on 5.6s. Four of the larger beads creep 2 to 5 units downward over 16s to 25s and are returned while dimmed. Every 1.6s to 2.2s a bead necks, snaps back, and releases a teardrop that accelerates 90 to 160 source units down, stretches, drags a wet streak, flattens as it lands and fades. The layer carries the same `data-photo` transform as the picture, so every mark magnifies and drifts locked to its bead | The beads are baked into the photograph and were the one thing in the hero that reads as wet but could not move. The first attempt at this was invisible: a wide soft glow on `screen` adds nothing over a lit leaf, which is where most of these beads are. Small and bright beats large and faint, so nearly all the brightness now sits in a pinpoint two or three source units across. Four unsynced cycles per bead are what make two dozen marks read as water rather than as animation, and the drip is the event the tile is watched for: one to two drops in flight at any moment, never more than three, none reaching the frame edge or the caption |
 | Button `:active` | `scale(0.98)` | Tactile feedback |
 | Generation pending | The existing `--grad-arc` turns inside the reserved result slot at `opacity: 0.5` | Makes a multi-second model call legible without shifting the page or inventing a spinner |
+| Page atmosphere | `--grad-page` fixed to the viewport at `z.atmosphere`, resting scaled 1.18 so it pans its own slack. Two tweens on deliberately unequal periods: the drift travels `xPercent: 5` and `yPercent: -3.5` over 34s, while opacity breathes down to 0.76 of its cap over 21s, so the two never phase-lock. Marketing routes rest at the full cap, the signed-in and auth routes at 0.55 | Every route except `/` was unlit type on flat `--ink`, while `/` carried a violet wash, an arc, two marquees, a simulation and a live photograph. The wash is what makes a secondary route part of the same product rather than a black document, and the slow unequal drift is what stops a static gradient reading as a flat panel. It is the one behaviour every route in scope shares, so it is what carries the atmosphere the eleven distinct layout families cannot each invent for themselves |
+| Route masthead | The existing `.hero-in` class and its `--i` stagger, 90ms apart, 24px rise, on the eyebrow, heading and opening paragraph | The same reason the hero has it, applied where the same problem exists: these pages open with a heading arriving all at once after a band of empty black. It is CSS, inside the existing reduced-motion guard, so it costs no client bundle and ships the content visible |
+| Hairline draw | Each `.rule` scales in from its leading edge, `scaleX` from `transform-origin: left`, scrubbed to scroll from `top bottom-=40` to `top center`. Driven by GSAP writing the `--rule` custom property, which the hairline's pseudo-element reads | These pages are built almost entirely from 1px `--line` rules, and those rules **are** the structure. Drawing them is the page assembling itself as it is read, which is the one scroll behaviour their content actually motivates. `--rule` defaults to 1, so the hairline is full width in the server-rendered HTML and nothing depends on the script |
+| Secondary image drift | The photograph on `/product`, `/learn`, `/build` and `/generator` rests at `scale(1.07)` and pans `yPercent: -3` to `3` inside its existing `overflow-hidden` frame, scrubbed, `ease: "none"` | It is the quiet cousin of the hero photo's drift, not a second copy: no hover magnify, no pointer tracking, no bead layer. The frame does not move, so no neighbouring element is displaced and no layout shifts. The rest scale lives inside the tween, so reduced motion leaves the photograph at its natural size rather than statically cropped |
 
 The repaired hero brand containment was verified for 63.758 seconds at both
 1440 x 1200 and 390 x 844. The browser sampled 3,982 desktop frames and 3,981
@@ -504,9 +593,22 @@ distinct rendered positions, collision flourishes remained active, and DOM
 order changed repeatedly. Under reduced motion, the group, bodies, and flourish
 wrappers gained no inline transform before or after the observation window.
 
+The four behaviours prompt 032 added were verified in a real Chrome forced to
+`prefers-reduced-motion: reduce`, sampled at load and again after scrolling, and
+the evidence is absence of inline style rather than a claim that `matchMedia`
+was used: the wash's inline `style` held only the four authored properties with
+no `transform` and no `will-change`, its computed transform was `none`, the
+drifting photograph's computed transform was `none` and its only inline style
+was `next/image`'s own `color:transparent`, and **all four `.rule` elements had a
+`null` inline style attribute** with `--rule` unset, so the hairlines rendered
+at their full 1080px width. Nothing changed after scrolling. Under normal
+motion the same probes read `--rule` at 0.303, 0.084, 0, 0 mid-scroll and the
+wash at `scale(1.18) translate(85.9px, -34.7px)` with `opacity: 0.868`, which is
+what a scrub and an unsynced breath look like in flight.
+
 Easing: `cubic-bezier(0.16, 1, 0.3, 1)`. Springs only on hover physics.
 
-**Two marquee regions, both ambient** - the gallery on both its axes, and the logo wall on one. `prefers-reduced-motion: reduce` disables the arc rotation, the generation pending rotation, the gallery drift, the logo wall marquee, the brand block simulation, the hero photo drift and its hover magnify, the bead glint wander, flicker, crescent and halo cycles, the bead creep and the drips, and all scroll reveals; the count-up snaps to its final value. What remains on the macaw is the static bloom, held at its resting values, because the shine is a look rather than a motion, and a still bead should still look wet.
+**Two marquee regions, both ambient** - the gallery on both its axes, and the logo wall on one. `prefers-reduced-motion: reduce` disables the arc rotation, the generation pending rotation, the gallery drift, the logo wall marquee, the brand block simulation, the hero photo drift and its hover magnify, the bead glint wander, flicker, crescent and halo cycles, the bead creep and the drips, all scroll reveals, **the page atmosphere drift and breath, the route masthead stagger, the hairline draw and the secondary image drift**; the count-up snaps to its final value. What remains on the macaw is the static bloom, held at its resting values, because the shine is a look rather than a motion, and a still bead should still look wet.
 
 ---
 
@@ -541,6 +643,9 @@ From `.agents/skills`. Where the brief and a skill default disagree, the brief w
 | §3, restrained motion: decorative loops do not ship | The hero's brand block simulates its four marks as colliding bodies that traverse the tile and bounce off one another | The user asked for it explicitly, pointing at the block and at the shapes bumping like a bouncy castle. It is **not** a third marquee region: no strip of repeating content translates, so §5.2's *two marquee regions* rule stands unchanged rather than being quietly bent. The §3 row disables it under reduced motion, matching the arc, the drift, the marquee and the reveals. |
 | §3, tile hover is `scale(1.02)` | The hero photo tile magnifies to `scale(1.18)` and tracks the pointer | The user asked for a magnify on the hero image specifically, and the photograph is the one element on the page with detail worth magnifying into. The tile itself still does not scale: only the picture inside its fixed frame moves, so the hero grid never shifts and no neighbouring cell is displaced. Every other tile keeps the table's 1.02. |
 | §5.2 / §3, one marquee per page | The gallery's stacked columns gain a second axis | It is the *same* marquee, in the same section, in the same slot: one region, two axes, and the section gains no other motion. |
+| §1.2, "four, and only four" gradients | A fifth, `--grad-page`, ships | The user asked for the other pages to be colourful and animated. It is composed only from hexes already in §1.1, spends `--violet-deep` and `--magenta` on the atmosphere-only role they were declared for and had never been used in, and carries no lime, so the two-accent lock is untouched. It is also the only gradient with more than one site of use, which is the point: one definition, positioned per route, rather than sixteen inventions. |
+| §2.8, §2.11, §2.12, "no motion" on the application routes | `/generate`, `/account`, `/library`, `/g/[id]`, `/g/[id]/report`, `/sign-in` and `/sign-up` gain the restrained tier | The user asked for motion on **every** route except `/`, which overrides those sections under `AGENTS.md` §1 rule 1. The override is not a licence to make a working surface restless, so the tier is the wash at `opacity: 0.55` plus the masthead stagger and nothing else: no scrub, no drift, nothing that animates in response to a pending action, a status region or a result. `/generate` in particular gets the wash only, so it never competes with the `--grad-arc` rotation §3 already gives the model call. |
+| §9.C / §5.2, no third marquee region | Unchanged, and deliberately so | The page atmosphere is **not** a third marquee: no strip of repeating content translates. A single soft gradient panning its own slack is the same category as the hero photo's drift, so §5.2's *two marquee regions* rule stands rather than being quietly bent. |
 
 ### 5.2 Binding, no exceptions
 

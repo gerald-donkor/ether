@@ -1,4 +1,5 @@
 import { GeneratorWorkspace } from "@/components/app/GeneratorWorkspace";
+import { PageAtmosphere } from "@/components/motion/PageAtmosphere";
 import { Container } from "@/components/ui/Container";
 import { requireUserId } from "@/lib/auth";
 import { getPreferencesForOwner } from "@/lib/db/account";
@@ -29,20 +30,28 @@ export default async function GeneratePage() {
   );
 
   return (
-    <Container className="py-16 md:py-24">
-      <GeneratorWorkspace
-        initialChoice={initialChoice}
-        initialPublish={preferences?.defaultVisibility === "public"}
-        initialGenerations={generations.map((generation) => ({
-          id: generation.id,
-          prompt: generation.prompt,
-          imageUrl: generation.imageUrl,
-          width: generation.width,
-          height: generation.height,
-          visibility: generation.visibility,
-          createdAt: generation.createdAt.toISOString(),
-        }))}
-      />
-    </Container>
+    <>
+      {/* Wash only. This route is watched while a multi-second model call
+          runs, and design-system.md 3 already gives that wait the --grad-arc
+          rotation inside the reserved result slot. Nothing here competes with
+          it, and the masthead lives in GeneratorWorkspace, which this change
+          does not touch. */}
+      <PageAtmosphere variant="quiet" />
+      <Container className="relative py-16 md:py-24">
+        <GeneratorWorkspace
+          initialChoice={initialChoice}
+          initialPublish={preferences?.defaultVisibility === "public"}
+          initialGenerations={generations.map((generation) => ({
+            id: generation.id,
+            prompt: generation.prompt,
+            imageUrl: generation.imageUrl,
+            width: generation.width,
+            height: generation.height,
+            visibility: generation.visibility,
+            createdAt: generation.createdAt.toISOString(),
+          }))}
+        />
+      </Container>
+    </>
   );
 }

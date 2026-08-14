@@ -1,5 +1,8 @@
+import type { CSSProperties } from "react";
 import type { Metadata } from "next";
 import Image from "next/image";
+import { PageAtmosphere } from "@/components/motion/PageAtmosphere";
+import { ScrollScrub } from "@/components/motion/ScrollScrub";
 import { Button } from "@/components/ui/Button";
 import { Container } from "@/components/ui/Container";
 
@@ -26,58 +29,76 @@ const WORKFLOW = [
 
 export default function GeneratorPage() {
   return (
-    <Container>
-      <div className="pt-32 pb-24 md:pt-40 md:pb-32">
-        <header className="max-w-[760px]">
-          <h1 className="text-text text-[clamp(40px,6vw,60px)] leading-[1.5] tracking-[-0.01em]">
-            A working path from instruction to image.
-          </h1>
-          <p className="text-text-2 mt-6 max-w-[60ch] text-[15px] leading-[26px]">
-            Ether keeps the current generation loop direct and keeps recent
-            work private to its owner.
-          </p>
-        </header>
-
-        <section aria-label="Generator workflow" className="mt-16 md:mt-24">
-          {WORKFLOW.map((item, index) => (
-            <article
-              key={item.title}
-              className={`border-line grid gap-4 border-t py-10 md:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] md:gap-16 md:py-12 ${
-                index === 1 ? "md:ml-24" : index === 2 ? "md:ml-48" : ""
-              }`}
-            >
-              <h2 className="text-text text-[22px] leading-[30px]">
-                {item.title}
-              </h2>
-              <p className="text-text-2 max-w-[58ch] text-[15px] leading-[26px]">
-                {item.copy}
+    <>
+      <PageAtmosphere variant="masthead" />
+      <ScrollScrub>
+        <Container>
+          <div className="pt-32 pb-24 md:pt-40 md:pb-32">
+            <header className="max-w-[760px]">
+              <p
+                className="hero-in text-violet text-[12px] leading-none font-medium tracking-[0.12em] uppercase"
+                style={{ "--i": 0 } as CSSProperties}
+              >
+                Generator
               </p>
-            </article>
-          ))}
-        </section>
+              <h1
+                className="hero-in text-text mt-8 text-[clamp(40px,6vw,60px)] leading-[1.5] tracking-[-0.01em]"
+                style={{ "--i": 1 } as CSSProperties}
+              >
+                A working path from instruction to image.
+              </h1>
+              <p
+                className="hero-in text-text-2 mt-6 max-w-[60ch] text-[15px] leading-[26px]"
+                style={{ "--i": 2 } as CSSProperties}
+              >
+                Ether keeps the current generation loop direct and keeps recent
+                work private to its owner.
+              </p>
+            </header>
 
-        <figure className="mt-8 md:mt-12 md:ml-48">
-          <div className="overflow-hidden rounded-panel">
-            <Image
-              src="/assets/ui/img/gallery-coast.jpg"
-              alt="A tidal pool below a cliff at sunset, used as an artboard reference."
-              width={1200}
-              height={628}
-              sizes="(max-width: 767px) calc(100vw - 40px), (max-width: 1279px) calc(100vw - 256px), 888px"
-              className="aspect-[12/7] w-full object-cover"
-            />
+            <section aria-label="Generator workflow" className="mt-16 md:mt-24">
+              {WORKFLOW.map((item, index) => (
+                <article
+                  key={item.title}
+                  className={`rule grid gap-4 py-10 md:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] md:gap-16 md:py-12 ${
+                    index === 1 ? "md:ml-24" : index === 2 ? "md:ml-48" : ""
+                  }`}
+                >
+                  <h2 className="text-text text-[22px] leading-[30px]">
+                    {item.title}
+                  </h2>
+                  <p className="text-text-2 max-w-[58ch] text-[15px] leading-[26px]">
+                    {item.copy}
+                  </p>
+                </article>
+              ))}
+            </section>
+
+            <figure className="mt-8 md:mt-12 md:ml-48">
+              <div className="overflow-hidden rounded-panel">
+                <Image
+                  data-drift
+                  src="/assets/ui/img/gallery-coast.jpg"
+                  alt="A tidal pool below a cliff at sunset, used as an artboard reference."
+                  width={1200}
+                  height={628}
+                  sizes="(max-width: 767px) calc(100vw - 40px), (max-width: 1279px) calc(100vw - 256px), 888px"
+                  className="aspect-[12/7] w-full object-cover"
+                />
+              </div>
+              <figcaption className="text-text-3 mt-3 text-[13px] leading-[22px]">
+                Reference photograph from the Ether artboard.
+              </figcaption>
+            </figure>
+
+            <div className="pt-16 md:pt-24 md:pl-48">
+              <Button href="/generate" className="px-6 py-3 text-[15px]">
+                Open generator
+              </Button>
+            </div>
           </div>
-          <figcaption className="text-text-3 mt-3 text-[13px] leading-[22px]">
-            Reference photograph from the Ether artboard.
-          </figcaption>
-        </figure>
-
-        <div className="pt-16 md:pt-24 md:pl-48">
-          <Button href="/generate" className="px-6 py-3 text-[15px]">
-            Open generator
-          </Button>
-        </div>
-      </div>
-    </Container>
+        </Container>
+      </ScrollScrub>
+    </>
   );
 }
