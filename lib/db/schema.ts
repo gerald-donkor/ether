@@ -264,6 +264,26 @@ export const billingHolds = pgTable(
   ],
 );
 
+export const billingRefunds = pgTable(
+  "billing_refunds",
+  {
+    stripeRefundId: text("stripe_refund_id").primaryKey(),
+    userId: text("user_id").notNull(),
+    // The payment the refund is against, so a grant that lands *after* its
+    // refund can find it and replay the reversal. Not nullable, unlike
+    // `billing_holds.stripe_payment_intent_id`: there is no pre-existing row
+    // here to accommodate.
+    stripePaymentIntentId: text("stripe_payment_intent_id").notNull(),
+    // Both provider amounts in minor units, stored rather than re-fetched
+    // because the replay runs inside the grant path and must compute the
+    // proportional share without a second `paymentIntents.retrieve`.
+    refundAmount: integer("refund_amount").notNull(),
+    chargedAmount: integer("charged_amount").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("billing_refunds_payment_intent_idx").on(table.stripePaymentIntentId)],
+);
+
 export const creditReservations = pgTable(
   "credit_reservations",
   {

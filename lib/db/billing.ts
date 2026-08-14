@@ -5,6 +5,7 @@ import { getDb } from "./index";
 import {
   billingCustomers,
   billingHolds,
+  billingRefunds,
   billingSubscriptions,
   billingWebhookEvents,
   creditLedger,
@@ -299,4 +300,44 @@ export async function getDisputesForPaymentIntent(stripePaymentIntentId: string)
     .where(eq(billingHolds.stripePaymentIntentId, stripePaymentIntentId))
     .orderBy(billingHolds.createdAt);
   return rows.map((row) => row.stripeDisputeId);
+}
+
+/**
+ * The refund, recorded against its payment before the reversal is attempted.
+ *
+ * `refund.created` fires once per refund, so a redelivery carries the same
+ * `re_…` and lands on the primary key. The amounts are not overwritten for the
+ * same reason: there is no second, different version of this refund to record.
+ */
+export async function recordBillingRefund(input: {
+  stripeRefundId: string;
+  userId: string;
+  stripePaymentIntentId: string;
+  refundAmount: number;
+  chargedAmount: number;
+}) {
+  await getDb().insert(billingRefunds).values(input).onConflictDoNothing({
+    target: billingRefunds.stripeRefundId,
+  });
+}
+
+/**
+ * Every refund recorded against a payment, oldest first.
+ *
+ * The refund counterpart of `getDisputesForPaymentIntent`, and it exists for
+ * the same reason: a `refund.created` delivered before its grant found no grant
+ * to reverse and wrote no ledger row. The grant path replays whatever this
+ * returns, keyed on the refund id, so the reversal happens exactly once
+ * whichever order the two land in.
+ */
+export async function getRefundsForPaymentIntent(stripePaymentIntentId: string) {
+  return getDb()
+    .select({
+      stripeRefundId: billingRefunds.stripeRefundId,
+      refundAmount: billingRefunds.refundAmount,
+      chargedAmount: billingRefunds.chargedAmount,
+    })
+    .from(billingRefunds)
+    .where(eq(billingRefunds.stripePaymentIntentId, stripePaymentIntentId))
+    .orderBy(billingRefunds.createdAt);
 }

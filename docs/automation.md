@@ -399,3 +399,53 @@ stripe trigger checkout.session.completed --api-key "$STRIPE_SECRET_KEY" \
 the event back with `stripe events retrieve` and confirm the metadata actually
 landed **before** asserting anything about the status code, or the test proves
 only that an unmarked fixture behaves like an unmarked fixture.
+
+### Drive a subscription renewal with a test clock
+
+Worked out at prompt 029, and captured because the naive version of it fails
+silently: the renewal invoice stays in `draft` and the run reports no renewal
+rather than reporting an error.
+
+```ts
+const clock = await stripe.testHelpers.testClocks.create({
+  frozen_time: Math.floor(Date.now() / 1000),   // the real now or later, so the
+});                                             // periods land in the real future
+const customer = await stripe.customers.create({ test_clock: clock.id });
+const method = await stripe.paymentMethods.attach("pm_card_visa", { customer: customer.id });
+await stripe.customers.update(customer.id, {
+  invoice_settings: { default_payment_method: method.id },   // not "pm_card_visa"
+});
+```
+
+Four things the docs do not make obvious, each of which cost a run:
+
+1. **`pm_card_visa` is not the attached id.** `attach` returns a real `pm_…`;
+   setting the default to the literal token fails with "the payment method must
+   be attached to the customer".
+2. **Insert a `billing_customers` row for a throwaway owner** before creating
+   the subscription, or `ownerFor` throws `Unknown Stripe customer` and every
+   event fails. Delete it, and its ledger rows, when the run finishes.
+3. **Use the catalog price**, resolved by lookup key. `syncSubscription` rejects
+   an unapproved price, so an ad-hoc one tests nothing.
+4. **"Advance the time by one hour" is not enough.** After advancing past
+   `current_period_end`, read the draft invoice's **`automatically_finalizes_at`**
+   and advance past *that*:
+
+```ts
+const [draft] = (await stripe.invoices.list({ customer: customer.id, status: "draft" })).data;
+await stripe.testHelpers.testClocks.advance(clock.id, { frozen_time: draft.automatically_finalizes_at + 3900 });
+```
+
+Poll the clock's `status` until `ready` after every advance, and then poll the
+invoice list until two invoices read `paid` — "Stripe collects payments after
+the test clock advances", so `ready` is not the end of it.
+
+Clean up by deleting the clock, which deletes the customer and the subscription
+with it. **Delete the clock first and wait for the event burst to drain**, then
+remove the `billing_customers` row: the other order makes the handler answer 500
+for `customer.subscription.deleted` on an owner the database no longer knows.
+
+**A test clock cannot verify credit expiry.** It moves Stripe's clock;
+`reconcile_credit_balance` keys on PostgreSQL's `now()`. Expiry is verified in
+`tests/billing-db.integration.ts` by moving a grant's `expires_at` into the real
+past. See `docs/backend.md`, prompt 029.

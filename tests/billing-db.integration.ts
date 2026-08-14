@@ -1,11 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { and, eq } from "drizzle-orm";
+import { revocableCreditsForRefund } from "../lib/billing/events";
 import {
   getDisputesForPaymentIntent,
   getPurchaseGrantCredits,
+  getRefundsForPaymentIntent,
   grantPurchaseCredits,
   readCreditBalance,
+  recordBillingRefund,
   reserveGenerationCapacity,
   reversePurchaseCredits,
   setBillingHold,
@@ -15,6 +18,7 @@ import {
 import { getDb } from "../lib/db/index";
 import {
   billingHolds,
+  billingRefunds,
   billingSubscriptions,
   creditLedger,
   creditReservations,
@@ -219,6 +223,157 @@ test("a dispute revokes exactly once whichever order it and its grant arrive in"
     for (const owner of [before.owner, after.owner]) {
       await db.delete(creditLedger).where(eq(creditLedger.userId, owner));
       await db.delete(billingHolds).where(eq(billingHolds.userId, owner));
+    }
+  }
+});
+
+test("a refund revokes exactly once whichever order it and its grant arrive in", async () => {
+  const suffix = crypto.randomUUID();
+  const db = getDb();
+  const GRANT_CREDITS = 100;
+  const CHARGED = 10000;
+  const REFUNDED = 2500;
+
+  // The same machinery the webhook uses: the refund row records the payment
+  // and both provider amounts, the grant path replays whatever is recorded,
+  // and both reversals are keyed on the refund id rather than on an event id.
+  const replayGrantPath = async (paymentIntentId: string) => {
+    for (const refund of await getRefundsForPaymentIntent(paymentIntentId)) {
+      const maximum = revocableCreditsForRefund({ grantCredits: GRANT_CREDITS, refundAmount: refund.refundAmount, chargedAmount: refund.chargedAmount });
+      if (maximum === 0) continue;
+      await reversePurchaseCredits({ stripeObjectId: paymentIntentId, stripeEventId: refund.stripeRefundId, reason: "refund_reversal", maximumCredits: maximum });
+    }
+  };
+  const reversals = async (owner: string) => db
+    .select({ delta: creditLedger.delta, key: creditLedger.stripeEventId })
+    .from(creditLedger)
+    .where(and(eq(creditLedger.userId, owner), eq(creditLedger.reason, "refund_reversal")));
+
+  const before = { owner: `refund-before-${suffix}`, refund: `re_before_${suffix}`, payment: `pi_refund_before_${suffix}` };
+  const after = { owner: `refund-after-${suffix}`, refund: `re_after_${suffix}`, payment: `pi_refund_after_${suffix}` };
+
+  // What the refund handler does, in the order it does it: record, then try to
+  // reverse against whatever grant exists.
+  const refundHandler = async (side: typeof before) => {
+    await recordBillingRefund({ stripeRefundId: side.refund, userId: side.owner, stripePaymentIntentId: side.payment, refundAmount: REFUNDED, chargedAmount: CHARGED });
+    const grantCredits = await getPurchaseGrantCredits(side.payment);
+    if (!grantCredits) return;
+    const maximum = revocableCreditsForRefund({ grantCredits, refundAmount: REFUNDED, chargedAmount: CHARGED });
+    if (maximum === 0) return;
+    await reversePurchaseCredits({ stripeObjectId: side.payment, stripeEventId: side.refund, reason: "refund_reversal", maximumCredits: maximum });
+  };
+
+  try {
+    // Direction one: the refund is delivered first, finds no grant, and writes
+    // no ledger row. Before this change that revocation was lost for good.
+    assert.equal(await readCreditBalance(before.owner), 10);
+    await refundHandler(before);
+    assert.equal((await reversals(before.owner)).length, 0);
+
+    // The grant lands, and replaying the recorded refund takes back its
+    // proportional share. A quarter of the charge is a quarter of the credits.
+    await grantPurchaseCredits({ userId: before.owner, credits: GRANT_CREDITS, reason: "top_up_grant", stripeEventId: `evt_refund_before_${suffix}`, stripeObjectId: before.payment });
+    assert.equal(await readCreditBalance(before.owner), 110);
+    await replayGrantPath(before.payment);
+    assert.equal(await readCreditBalance(before.owner), 85);
+
+    // A redelivery of either event writes nothing further, which is what
+    // keying on the refund id buys.
+    await replayGrantPath(before.payment);
+    await refundHandler(before);
+    assert.equal(await readCreditBalance(before.owner), 85);
+    const beforeRows = await reversals(before.owner);
+    assert.equal(beforeRows.length, 1);
+    assert.equal(beforeRows[0]?.delta, -25);
+    assert.equal(beforeRows[0]?.key, before.refund);
+
+    // Direction two, the ordinary one: the grant lands first, the grant path
+    // finds no refund to replay, and the refund handler does the revoking.
+    await grantPurchaseCredits({ userId: after.owner, credits: GRANT_CREDITS, reason: "top_up_grant", stripeEventId: `evt_refund_after_${suffix}`, stripeObjectId: after.payment });
+    await replayGrantPath(after.payment);
+    assert.equal(await readCreditBalance(after.owner), 110);
+
+    await refundHandler(after);
+    assert.equal(await readCreditBalance(after.owner), 85);
+
+    // And the same redelivery guarantee from the other side: a late replay of
+    // the grant path must not revoke a second time.
+    await replayGrantPath(after.payment);
+    assert.equal(await readCreditBalance(after.owner), 85);
+    const afterRows = await reversals(after.owner);
+    assert.equal(afterRows.length, 1);
+    assert.equal(afterRows[0]?.delta, -25);
+    assert.equal(afterRows[0]?.key, after.refund);
+  } finally {
+    for (const owner of [before.owner, after.owner]) {
+      await db.delete(creditLedger).where(eq(creditLedger.userId, owner));
+      await db.delete(billingRefunds).where(eq(billingRefunds.userId, owner));
+    }
+  }
+});
+
+test("an expired subscription grant expires its unspent remainder exactly once", async () => {
+  const suffix = crypto.randomUUID();
+  const unspent = `expiry-unspent-${suffix}`;
+  const partial = `expiry-partial-${suffix}`;
+  const db = getDb();
+
+  // `reconcile_credit_balance` responds to `expires_at <= now()` and to nothing
+  // else, so the grant is written with a future expiry and then moved into the
+  // real past. A Stripe test clock cannot drive this: it moves Stripe's clock,
+  // not PostgreSQL's.
+  const expire = async (stripeObjectId: string) => {
+    await db.update(creditLedger)
+      .set({ expiresAt: new Date(Date.now() - 60_000) })
+      .where(eq(creditLedger.stripeObjectId, stripeObjectId));
+  };
+  const expiries = async (owner: string) => db
+    .select({ delta: creditLedger.delta })
+    .from(creditLedger)
+    .where(and(eq(creditLedger.userId, owner), eq(creditLedger.reason, "subscription_expiry")));
+  const nextMonth = new Date(Date.now() + 3_600_000);
+
+  try {
+    // A fully unspent grant expires whole, and the bought credits beside it do
+    // not: a `top_up_grant` carries no `expires_at`, which is what makes bought
+    // credits permanent and granted ones monthly.
+    const subscriptionObject = `in_unspent_${suffix}`;
+    await grantPurchaseCredits({ userId: unspent, credits: 50, reason: "subscription_grant", stripeEventId: `evt_sub_${suffix}`, stripeObjectId: subscriptionObject, expiresAt: nextMonth });
+    await grantPurchaseCredits({ userId: unspent, credits: 25, reason: "top_up_grant", stripeEventId: `evt_top_${suffix}`, stripeObjectId: `pi_top_${suffix}` });
+    assert.equal(await readCreditBalance(unspent), 85);
+
+    await expire(subscriptionObject);
+    assert.equal(await readCreditBalance(unspent), 35);
+    const unspentRows = await expiries(unspent);
+    assert.equal(unspentRows.length, 1);
+    assert.equal(unspentRows[0]?.delta, -50);
+
+    // Reconciling twice writes the expiry once, and leaves the permanent
+    // credits alone.
+    assert.equal(await readCreditBalance(unspent), 35);
+    assert.equal((await expiries(unspent)).length, 1);
+
+    // A partially spent grant expires only the remainder, never the spent part.
+    const partialObject = `in_partial_${suffix}`;
+    await grantPurchaseCredits({ userId: partial, credits: 100, reason: "subscription_grant", stripeEventId: `evt_sub_partial_${suffix}`, stripeObjectId: partialObject, expiresAt: nextMonth });
+    assert.equal(await readCreditBalance(partial), 110);
+
+    const operationId = crypto.randomUUID();
+    const reserved = await reserveGenerationCapacity({ userId: partial, operationId, model: "synthetic", imageCount: 6, providerUnits: 1, creditCost: 1 });
+    assert.equal(reserved.status, "accepted");
+    assert.equal(await settleGenerationCredits(operationId, 6), 6);
+    assert.equal(await readCreditBalance(partial), 104);
+
+    await expire(partialObject);
+    assert.equal(await readCreditBalance(partial), 10);
+    const partialRows = await expiries(partial);
+    assert.equal(partialRows.length, 1);
+    assert.equal(partialRows[0]?.delta, -94);
+  } finally {
+    for (const owner of [unspent, partial]) {
+      await db.delete(creditLedger).where(eq(creditLedger.userId, owner));
+      await db.delete(creditReservations).where(eq(creditReservations.userId, owner));
+      await db.delete(usageEvents).where(eq(usageEvents.userId, owner));
     }
   }
 });

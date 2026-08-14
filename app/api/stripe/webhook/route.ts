@@ -14,7 +14,9 @@ import {
   getDisputesForPaymentIntent,
   getOwnerForStripeCustomer,
   getPurchaseGrantCredits,
+  getRefundsForPaymentIntent,
   grantPurchaseCredits,
+  recordBillingRefund,
   reversePurchaseCredits,
   setBillingHold,
   upsertBillingSubscription,
@@ -97,6 +99,23 @@ async function applyEvent(event: Stripe.Event) {
     if (!paymentIntent || offer.kind !== "top_up" || offer.priceId !== linePriceId) throw new Error("Invalid top-up Checkout");
     await grantPurchaseCredits({ ...owner, credits: offer.credits, reason: "top_up_grant", stripeEventId: event.id, stripeObjectId: paymentIntent, checkoutSessionId: session.id });
 
+    // A refund delivered before this grant recorded its row and no ledger row,
+    // because `reverse_purchase_credits` finds no grant and returns 0. Replay
+    // it now, keyed on the refund id so it collides with the refund handler's
+    // own reversal and lands exactly once. The amounts come off the recorded
+    // row rather than a second `paymentIntents.retrieve`.
+    //
+    // Refunds before disputes: a dispute revokes everything and the reversal
+    // caps at whatever is left unspent, so running it first would leave a
+    // partial refund's proportional row with nothing to take. The total is the
+    // same either way; the order is what makes the ledger read as the history
+    // that actually happened.
+    for (const refund of await getRefundsForPaymentIntent(paymentIntent)) {
+      const maximum = revocableCreditsForRefund({ grantCredits: offer.credits, refundAmount: refund.refundAmount, chargedAmount: refund.chargedAmount });
+      if (maximum === 0) continue;
+      await reversePurchaseCredits({ stripeObjectId: paymentIntent, stripeEventId: refund.stripeRefundId, reason: "refund_reversal", maximumCredits: maximum });
+    }
+
     // A dispute delivered before this grant wrote a hold and no ledger row,
     // because `reverse_purchase_credits` finds no grant and returns 0. Replay
     // it now that the grant exists. Keyed on the dispute id, so it collides
@@ -138,6 +157,15 @@ async function applyEvent(event: Stripe.Event) {
     if (!paymentIntentId) return undefined;
     const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
     const owner = await ownerFor(intent.customer);
+
+    // Recorded before the reversal is attempted, and that order is the fix, as
+    // it is in the dispute branch below. If the grant is still in flight this
+    // row is what its own path will find; if the grant has already landed, the
+    // reversal below writes the ledger row itself.
+    await recordBillingRefund({ stripeRefundId: refund.id, userId: owner.userId, stripePaymentIntentId: paymentIntentId, refundAmount: refund.amount, chargedAmount: intent.amount });
+
+    // No grant yet is no longer a loss: the row above is what makes the
+    // revocation happen when the grant path replays it.
     const grantCredits = await getPurchaseGrantCredits(paymentIntentId);
     if (!grantCredits) return owner.userId;
     const maximum = revocableCreditsForRefund({ grantCredits, refundAmount: refund.amount, chargedAmount: intent.amount });
@@ -145,7 +173,13 @@ async function applyEvent(event: Stripe.Event) {
     // A refund too small to be worth a credit revokes none. The reversal
     // function rejects a non-positive maximum, so the caller does not call it.
     if (maximum === 0) return owner.userId;
-    await reversePurchaseCredits({ stripeObjectId: paymentIntentId, stripeEventId: event.id, reason: "refund_reversal", maximumCredits: maximum });
+
+    // Keyed on `refund.id`, not `event.id`, for the same reason the dispute
+    // branch keys on `dispute.id`: `re_…` is the one identifier both this
+    // handler and the grant path can derive, so the existing `stripe_event_id`
+    // dedupe in `reverse_purchase_credits` makes the two paths idempotent
+    // against each other with no new function and no new column.
+    await reversePurchaseCredits({ stripeObjectId: paymentIntentId, stripeEventId: refund.id, reason: "refund_reversal", maximumCredits: maximum });
     return owner.userId;
   }
 
