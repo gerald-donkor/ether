@@ -10,6 +10,7 @@
     "test": "node --conditions=react-server --import tsx --test tests/*.test.ts",
     "test:db": "dotenv -e .env.local -- node --conditions=react-server --import tsx tests/moderation-db.integration.ts",
     "test:billing-db": "dotenv -e .env.local -- node --conditions=react-server --import tsx tests/billing-db.integration.ts",
+    "test:owner-db": "dotenv -e .env.local -- node --conditions=react-server --import tsx tests/owner-boundary.integration.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "dotenv -e .env.local -- drizzle-kit migrate",
     "db:push": "dotenv -e .env.local -- drizzle-kit push"

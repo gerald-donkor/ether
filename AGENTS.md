@@ -204,6 +204,8 @@ Scripts that currently exist in `package.json`:
 - `npm run lint` — ESLint
 - `npm test` — environment-free moderation parser and validation tests
 - `npm run test:db` — moderation and quota integration checks with `.env.local`
+- `npm run test:billing-db` — credit, refund, dispute and expiry integration checks
+- `npm run test:owner-db` — the cross-owner data boundary against the database
 - `npm run db:generate` — generate a Drizzle migration from the schema
 - `npm run db:migrate` — apply committed Drizzle migrations with `.env.local`
 - `npm run db:push` — apply the Drizzle schema with `.env.local` loaded

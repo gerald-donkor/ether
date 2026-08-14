@@ -2459,3 +2459,112 @@ reason: it needs two real sign-ins and a card entry.
 
 **028's item 3 is closed by item A above**, and its item 4's "renewal and credit
 expiry across a period boundary" is closed by item B.
+
+## The cross-owner data boundary, prompt 030
+
+`AGENTS.md` §8.3 rule 4 — "two accounts must not see each other's generations,
+and that is verified against the database, not by clicking around" — had never
+been satisfied as a repeatable check. Prompt 016 could not run it because the
+database held exactly one owner. Prompt 027's M11 recorded it as not run,
+because a second Clerk identity is a prohibited action for the implementing
+agent. `docs/automation.md` held the procedure, but it was a throwaway module in
+`/tmp` and nothing in the repository ran it.
+
+`tests/owner-boundary.integration.ts` closes the database half of that rule.
+`npm run test:owner-db` runs it, with the same `dotenv -e .env.local --` and
+`--conditions=react-server` discipline as `test:db` and `test:billing-db`.
+
+### What it asserts
+
+Six tests, each with two synthetic owner ids suffixed with a fresh
+`crypto.randomUUID()`, cleanup in `finally`, and an aggregate assertion that no
+row remains for either id across `generations`, `usage_events`, `reports`,
+`user_preferences` and `credit_ledger`. Every assertion drives a real function
+from `lib/db/`, so what is proved is the query text the application runs.
+
+| test | functions driven | the boundary asserted |
+| --- | --- | --- |
+| the owner reads | `listGenerationsForUser`, `countGenerationsForUser`, `getGenerationForOwner`, `listLibraryPage` (live, removed, and searched), `readAccountExport`, `listAllImageUrlsForOwner` | B's reads never return A's row, including a search term drawn from A's own prompt |
+| the owner mutations | `setGenerationVisibilityForOwner`, `softDeleteGenerationForOwner`, `restoreGenerationForOwner`, `deleteGenerationForOwner`, `getGenerationForOwnerIncludingRemoved` | each returns `undefined` for the wrong owner **and** leaves the row unchanged on a re-read as the owner, then does what it says when the owner runs it |
+| the anonymous projections | `getShareableGeneration`, `listCommunityGenerations`, `listPublicGenerations` | only `unlisted`/`public` is shareable, only `public` reaches Community and the landing strip, a soft-deleted public row leaves both, and each projection's **own key list** is asserted so a later column addition fails the test rather than leaking |
+| moderation, both directions | `claimReport`, `completeReportWithTakedown`, then the reads above | B cannot report A's private row; A cannot report their own row (`user_id <> reporter_user_id`); B reports once, the second is `duplicate`; a taken-down row leaves A's own reads and every anonymous projection; A's export lists no report filed against them and contains **no reporter id anywhere** in its serialised payload |
+| the usage reading | `readOwnerUsageSummary` | A's usage events do not move B's rolling or daily totals |
+| the purge | `purgeOwnerData`, `ownerHasPublicGeneration`, `readAccountExport`, `readCreditBalance`, `countGenerationsForUser`, `listAllImageUrlsForOwner` | purging A empties A, and B's count, serialised export and credit balance are identical before and after, asserted by value |
+
+### The three deliberate omissions, and why
+
+- **`reserveGenerationQuota` is not called.** It takes the shared
+  provider-daily advisory lock and an accepted reservation spends real global
+  allocation. The usage rows are inserted straight through the schema instead;
+  the function under test is the owner-filtered `readOwnerUsageSummary`, which
+  takes no lock. The reason is written as a comment in the file so a later
+  session does not "fix" it.
+- **`getPublicGalleryImages` and `getCommunityGenerations` are not called.**
+  They wrap the two uncached functions in `unstable_cache`, a Next.js
+  request-scoped primitive with no meaning inside `node:test`. The uncached
+  functions underneath them carry the visibility filter, and those are what the
+  test drives.
+- **No Blob object is written or asserted gone.** `image_url` is a synthetic
+  string, so `docs/automation.md`'s Blob-polling clause does not apply. That
+  clause, and the `/tmp` procedure around it, stay in `docs/automation.md` for a
+  path this suite does not cover.
+
+### Nothing is printed
+
+Not an owner id, not a prompt, not a row id, not a url. Every assertion is on a
+boolean, a count, or a list of property names, and its message names the
+property that failed rather than its value. Where a whole object had to be
+compared — the purge's before-and-after export — it is compared as a serialised
+string so a failure reports `false !== true` rather than the other owner's data.
+The synthetic image urls deliberately embed no owner id, which is what makes the
+`JSON.stringify(export).includes(otherOwner)` assertion meaningful.
+
+### One finding, and it was in the test
+
+The purge test failed on its first run: B's export differed before and after.
+The cause was the test's own read ordering, not `purgeOwnerData`.
+`read_credit_balance` calls `reconcile_credit_balance` before it answers, and
+that function inserts the 10-credit `starter_grant` row for an owner who has no
+ledger row yet (`drizzle/0008_nosy_doctor_octopus.sql`). Reading the balance
+*after* the export snapshot therefore put a row in the second snapshot only. The
+balance is now read first, with a comment saying why. **No change was made to
+`lib/db/`**, and none was needed: the purge is correct.
+
+### Verification, 2026-08-14
+
+- `npm run test:owner-db`: **6 tests, 6 pass, 0 fail**, 97,282 ms. The duration
+  is Neon scale-to-zero plus six sequential round-trip-heavy tests over the
+  pooled HTTP endpoint, not a performance finding.
+- `npm test`: 12 tests, 12 pass. Unchanged, as expected: no pure function
+  changed.
+- `npm run test:db`: 1 test, 1 pass. `npm run test:billing-db`: 7 tests, 7 pass.
+  Both unchanged.
+- `npm run lint` completed with no diagnostics.
+- `npm run build` compiled. Its route table `diff` against a stashed baseline of
+  `0a1dd57` returned `ROUTES IDENTICAL`: 22 routes, unchanged modes.
+- The prerendered `/` comparison returned `LANDING IDENTICAL`, both documents
+  **125,912 bytes**, the same length prompts 026 through 029 recorded.
+- The environment-absent build passed and produced the same route table.
+  `.env.local` was restored and confirmed present.
+- No environment variable was added, so the `AGENTS.md` §8.4 table is unchanged
+  and no client-bundle secret scan was warranted.
+
+### Still open, after 030
+
+**1. The two-account boundary through the browser.** Unchanged and still
+blocked: it needs two real Clerk sign-ins, which is a prohibited action for the
+implementing agent (M11). This prompt closes the database half of §8.3 rule 4
+completely and does not pretend to close the other. What remains unproved by
+machine is the *session* layer — that `proxy.ts`, the page-level `auth()` calls
+and the action-level session reads resolve the right owner for two concurrent
+real users. Every query those layers call is now proved owner-safe.
+
+**2, 3 and 4.** The per-refund proportional floor, the dispute-won rule, and
+"not deployed" (live mode, Production, a Dashboard webhook endpoint,
+`STRIPE_WEBHOOK_SECRET` in the Vercel project) all carry forward from 029
+unchanged. The first two are decided, not bugs.
+
+**A correction to `AGENTS.md` §2, made in this change** (§12 rule 8): its list
+of "scripts that currently exist in `package.json`" was missing
+`test:billing-db`, which prompt 027 added. Both it and the new `test:owner-db`
+are now listed.

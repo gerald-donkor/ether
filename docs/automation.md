@@ -207,9 +207,20 @@ grep -rl "$val" .next/static/ 2>/dev/null | wc -l
 
 ## Exercise an owner boundary without logging user data
 
-This procedure was worked out for the library and repeated for sharing. Use it
-for a query or mutation whose decisive property is that one owner cannot read
-or change another owner's row.
+**For the generation paths this is now a committed suite, not a procedure.**
+`npm run test:owner-db` (`tests/owner-boundary.integration.ts`, prompt 030)
+covers the recent list and count, the permalink read, the library page and its
+search, the four owner mutations, the removed-row read, the three anonymous
+projections, reporting in both directions, the takedown, the owner usage
+summary, the export and the purge. Run it rather than rebuilding any of that by
+hand, and extend it rather than writing a new `/tmp` module for anything it
+already reaches.
+
+The procedure below stays for a path the suite does not cover — a new table, a
+new projection, or **any check that asserts a Blob object is gone**, which the
+committed suite deliberately does not do. It was worked out for the library and
+repeated for sharing. Use it for a query or mutation whose decisive property is
+that one owner cannot read or change another owner's row.
 
 1. Create a temporary TypeScript module in `/tmp`, never in the repository.
 2. Load `.env.local` with the committed `dotenv` wrapper and import only the
